@@ -32,6 +32,8 @@ services:
         value: pizza_recipes
       - key: COSMOS_STYLES_CONTAINER
         value: pizza_styles
+      - key: COSMOS_FLOURS_CONTAINER
+        value: pizza_flours
       - key: API_KEY
         sync: false
       - key: ANTHROPIC_API_KEY

@@ -2,33 +2,69 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.recipe import STYLE_LIBRARY, TECHNIQUES, compute_recipe
+from app.recipe import STYLE_LIBRARY, TECHNIQUES, compute_recipe, scale_recipe
 from app.schemas import GeneratedRecipe, StyleAttribution, StyleInfo
 
 client = TestClient(app)
 
+# Valid catalogue flour types (see app/flours.py) used across API-level tests, which
+# validate flours[].type against the flour catalogue.
+SOFT_WHEAT_00 = "soft_wheat_00"
+WHOLE_WHEAT = "whole_wheat"
 
-def test_compute_recipe_direct_matches_ball_count_and_weight():
+
+def test_compute_recipe_is_a_single_ball_baseline():
     result = compute_recipe(
         flours=[{"type": "00 flour", "percent": 80}, {"type": "Whole wheat", "percent": 20}],
         technique="direct",
         style="custom",
-        num_balls=4,
         ball_weight_g=250,
     )
-    assert result["total_dough_g"] == pytest.approx(1000.0)
-    total = result["ingredients_total"]
-    dough_sum = total["flour_g"] + total["water_g"] + total["salt_g"] + total["oil_g"]
-    assert dough_sum == pytest.approx(1000.0, rel=0.01)
+    assert "num_balls" not in result
+    assert "total_dough_g" not in result
+    per_ball = result["ingredients_per_ball"]
+    dough_sum = per_ball["flour_g"] + per_ball["water_g"] + per_ball["salt_g"] + per_ball["oil_g"]
+    assert dough_sum == pytest.approx(250.0, rel=0.01)
     assert sum(f["percent"] for f in result["flours"]) == pytest.approx(100.0)
     assert result["leavening"]["type"] == "instant dry yeast"
+
+
+def test_scale_recipe_expands_to_a_batch():
+    base = compute_recipe(
+        flours=[{"type": "00 flour", "percent": 100}], technique="direct", ball_weight_g=250,
+    )
+    scaled = scale_recipe(base, 4)
+    assert scaled["num_balls"] == 4
+    assert scaled["total_dough_g"] == pytest.approx(1000.0)
+    assert scaled["ingredients_total"]["flour_g"] == pytest.approx(base["ingredients_per_ball"]["flour_g"] * 4, abs=0.1)
+    # per-ball reference stays the same regardless of batch size
+    assert scaled["ingredients_per_ball"] == base["ingredients_per_ball"]
+    # percentages/technique/schedule/attribution are unaffected by batch size
+    assert scaled["flours"][0]["percent"] == base["flours"][0]["percent"]
+    assert scaled["flours"][0]["grams"] == pytest.approx(base["flours"][0]["grams"] * 4, abs=0.1)
+    assert scaled["fermentation_schedule"] == base["fermentation_schedule"]
+
+
+def test_scale_recipe_scales_preferment_leavening_grams():
+    base = compute_recipe(
+        flours=[{"type": "Bread flour", "percent": 100}], technique="poolish",
+        hydration_pct=65, ball_weight_g=280,
+    )
+    scaled = scale_recipe(base, 3)
+    assert scaled["leavening"]["preferment_flour_g"] == pytest.approx(base["leavening"]["preferment_flour_g"] * 3, abs=0.1)
+    assert scaled["leavening"]["rest_hours"] == base["leavening"]["rest_hours"]  # text, unaffected
+
+
+def test_scale_recipe_rejects_non_positive_num_balls():
+    base = compute_recipe(flours=[{"type": "00 flour", "percent": 100}], technique="direct")
+    with pytest.raises(ValueError):
+        scale_recipe(base, 0)
 
 
 def test_flour_percentages_are_normalized_with_warning():
     result = compute_recipe(
         flours=[{"type": "00 flour", "percent": 70}, {"type": "Semola", "percent": 50}],
         technique="direct",
-        num_balls=1,
         ball_weight_g=250,
     )
     assert sum(f["percent"] for f in result["flours"]) == pytest.approx(100.0)
@@ -53,7 +89,6 @@ def test_preferment_techniques_build_a_preferment():
             flours=[{"type": "Bread flour", "percent": 100}],
             technique=technique,
             hydration_pct=65,
-            num_balls=2,
             ball_weight_g=280,
         )
         assert result["leavening"]["type"] == technique
@@ -96,18 +131,29 @@ def test_all_styles_generate_without_error():
 def test_api_generate_endpoint():
     response = client.post(
         "/recipes/generate",
+        params={"num_balls": 3},
         json={
-            "flours": [{"type": "00 flour", "percent": 90}, {"type": "Whole wheat", "percent": 10}],
+            "flours": [{"type": SOFT_WHEAT_00, "percent": 90}, {"type": WHOLE_WHEAT, "percent": 10}],
             "technique": "cold_ferment_48h",
             "style": "ny_style",
-            "num_balls": 3,
         },
     )
     assert response.status_code == 200
     body = response.json()
-    assert "num_balls" not in body
+    assert body["num_balls"] == 3
     assert body["ingredients_per_ball"]["flour_g"] == pytest.approx(body["ingredients_total"]["flour_g"] / 3, abs=0.1)
     assert body["style_attribution"]["author"] == "Tony Gemignani"
+
+
+def test_api_generate_defaults_to_one_ball():
+    response = client.post(
+        "/recipes/generate",
+        json={"flours": [{"type": SOFT_WHEAT_00, "percent": 100}], "technique": "direct"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["num_balls"] == 1
+    assert body["total_dough_g"] == pytest.approx(body["ball_weight_g"])
 
 
 def test_api_save_list_get_delete_roundtrip():
@@ -115,12 +161,14 @@ def test_api_save_list_get_delete_roundtrip():
         "/recipes",
         json={
             "name": "Friday night pizza",
-            "flours": [{"type": "00 flour", "percent": 100}],
+            "flours": [{"type": SOFT_WHEAT_00, "percent": 100}],
             "technique": "direct",
         },
     )
     assert create.status_code == 200
-    item_id = create.json()["id"]
+    body = create.json()
+    assert body["num_balls"] == 1  # saved response defaults to a single-ball view
+    item_id = body["id"]
 
     listing = client.get("/recipes")
     assert listing.status_code == 200
@@ -129,6 +177,13 @@ def test_api_save_list_get_delete_roundtrip():
     fetched = client.get(f"/recipes/{item_id}")
     assert fetched.status_code == 200
     assert fetched.json()["name"] == "Friday night pizza"
+
+    scaled = client.get(f"/recipes/{item_id}", params={"num_balls": 5})
+    assert scaled.status_code == 200
+    scaled_body = scaled.json()
+    assert scaled_body["num_balls"] == 5
+    assert scaled_body["total_dough_g"] == pytest.approx(scaled_body["ball_weight_g"] * 5)
+    assert scaled_body["ingredients_per_ball"] == fetched.json()["ingredients_per_ball"]
 
     deleted = client.delete(f"/recipes/{item_id}")
     assert deleted.status_code == 200
@@ -162,7 +217,7 @@ def test_style_info_shares_field_names_with_generated_recipe():
 def test_api_rejects_bad_technique():
     response = client.post(
         "/recipes/generate",
-        json={"flours": [{"type": "00 flour", "percent": 100}], "technique": "invalid"},
+        json={"flours": [{"type": SOFT_WHEAT_00, "percent": 100}], "technique": "invalid"},
     )
     assert response.status_code == 422
 
@@ -171,9 +226,27 @@ def test_api_rejects_unknown_style():
     response = client.post(
         "/recipes/generate",
         json={
-            "flours": [{"type": "00 flour", "percent": 100}],
+            "flours": [{"type": SOFT_WHEAT_00, "percent": 100}],
             "technique": "direct",
             "style": "does_not_exist",
         },
     )
     assert response.status_code == 400
+
+
+def test_api_rejects_unknown_flour():
+    response = client.post(
+        "/recipes/generate",
+        json={"flours": [{"type": "moon dust", "percent": 100}], "technique": "direct"},
+    )
+    assert response.status_code == 400
+    assert "unknown flour type" in response.json()["detail"]
+
+
+def test_api_flours_endpoint_lists_catalog():
+    response = client.get("/recipes/flours")
+    assert response.status_code == 200
+    ids = {f["id"] for f in response.json()["items"]}
+    assert SOFT_WHEAT_00 in ids
+    assert "rice_white" in ids
+    assert "durum_rimacinata" in ids

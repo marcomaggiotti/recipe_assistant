@@ -18,6 +18,10 @@ class FlourComponent(BaseModel):
 
 
 class RecipeGenerateRequest(BaseModel):
+    """Describes the dough formula for a single ball - how many balls you want is a
+    separate, query-time concern (see the `num_balls` query param on the /recipes
+    endpoints), not part of the saved formula."""
+
     name: str | None = None
     flours: list[FlourComponent] = Field(min_length=1)
     technique: Technique
@@ -26,7 +30,6 @@ class RecipeGenerateRequest(BaseModel):
     salt_pct: float | None = Field(default=None, ge=0, le=6)
     oil_pct: float | None = Field(default=None, ge=0, le=15)
     yeast_pct: float | None = Field(default=None, ge=0, le=5)
-    num_balls: int = Field(default=4, ge=1, le=50)
     ball_weight_g: float | None = Field(default=None, gt=0)
 
 
@@ -39,6 +42,11 @@ class StyleAttribution(BaseModel):
 
 
 class GeneratedRecipe(BaseModel):
+    """A single-ball formula (ball_weight_g), scaled to num_balls balls (default 1,
+    set via the `num_balls` query param) - flours[].grams, leavening's gram fields,
+    and ingredients_total reflect the full num_balls batch; ingredients_per_ball is
+    the constant per-ball reference regardless of num_balls."""
+
     flours: list[dict]
     technique: str
     hydration_pct: float
@@ -46,6 +54,7 @@ class GeneratedRecipe(BaseModel):
     oil_pct: float
     leavening: dict
     ball_weight_g: float
+    num_balls: int
     total_dough_g: float
     ingredients_total: dict
     ingredients_per_ball: dict
