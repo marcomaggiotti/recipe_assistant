@@ -4,7 +4,7 @@ from ..auth import require_api_key
 from ..config import get_settings
 from ..db import build_repository
 from ..recipe import compute_recipe as _compute_recipe
-from ..schemas import GeneratedRecipe, RecipeGenerateRequest, StyleInfo
+from ..schemas import GeneratedRecipe, RecipeGenerateRequest, StyleAttribution, StyleInfo
 from ..styles import build_style_store
 
 router = APIRouter(prefix="/recipes", tags=["recipes"], dependencies=[Depends(require_api_key)])
@@ -52,17 +52,19 @@ def compute_recipe(request: RecipeGenerateRequest) -> dict:
 def list_styles():
     return [
         StyleInfo(
-            key=key,
-            label=s["label"],
-            author=s["author"],
-            book=s["book"],
+            style=key,
             technique=s["technique"],
             hydration_pct=s["hydration_pct"],
             salt_pct=s["salt_pct"],
             oil_pct=s["oil_pct"],
             ball_weight_g=s["ball_weight_g"],
-            suggested_flours=s["suggested_flours"],
-            notes=s["notes"],
+            style_attribution=StyleAttribution(
+                label=s["label"],
+                author=s["author"],
+                book=s["book"],
+                suggested_flours=s["suggested_flours"],
+                notes=s["notes"],
+            ),
         )
         for key, s in get_style_store().list().items()
     ]

@@ -30,6 +30,14 @@ class RecipeGenerateRequest(BaseModel):
     ball_weight_g: float | None = Field(default=None, gt=0)
 
 
+class StyleAttribution(BaseModel):
+    label: str
+    author: str | None
+    book: str | None
+    suggested_flours: list[str]
+    notes: str
+
+
 class GeneratedRecipe(BaseModel):
     flours: list[dict]
     technique: str
@@ -44,7 +52,7 @@ class GeneratedRecipe(BaseModel):
     ingredients_per_ball: dict
     fermentation_schedule: list[dict]
     style: str
-    style_attribution: dict
+    style_attribution: StyleAttribution
     warnings: list[str]
 
 
@@ -60,17 +68,13 @@ class PizzaRecipeList(BaseModel):
 
 
 class StyleInfo(BaseModel):
-    key: str
-    label: str
-    author: str | None
-    book: str | None
+    style: str
     technique: str
     hydration_pct: float
     salt_pct: float
     oil_pct: float
     ball_weight_g: float
-    suggested_flours: list[str]
-    notes: str
+    style_attribution: StyleAttribution
 
 
 class AgentChatRequest(BaseModel):

@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.recipe import STYLE_LIBRARY, TECHNIQUES, compute_recipe
+from app.schemas import GeneratedRecipe, StyleAttribution, StyleInfo
 
 client = TestClient(app)
 
@@ -139,8 +140,22 @@ def test_api_save_list_get_delete_roundtrip():
 def test_api_styles_endpoint_lists_all():
     response = client.get("/recipes/styles")
     assert response.status_code == 200
-    keys = {s["key"] for s in response.json()}
+    body = response.json()
+    keys = {s["style"] for s in body}
     assert keys == set(STYLE_LIBRARY)
+    sample = next(s for s in body if s["style"] == "neapolitan_avpn")
+    assert sample["style_attribution"]["author"] == "Associazione Verace Pizza Napoletana (AVPN)"
+
+
+def test_style_info_shares_field_names_with_generated_recipe():
+    # StyleInfo should use the same "style"/"style_attribution" naming and the same
+    # recipe-default field names (technique, hydration_pct, ...) as GeneratedRecipe,
+    # rather than a flattened/renamed ("key" instead of "style") shape of its own.
+    shared_fields = {"style", "technique", "hydration_pct", "salt_pct", "oil_pct", "ball_weight_g", "style_attribution"}
+    assert shared_fields <= set(StyleInfo.model_fields)
+    assert shared_fields <= set(GeneratedRecipe.model_fields)
+    assert StyleInfo.model_fields["style_attribution"].annotation is StyleAttribution
+    assert GeneratedRecipe.model_fields["style_attribution"].annotation is StyleAttribution
 
 
 def test_api_rejects_bad_technique():
