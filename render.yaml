@@ -1,0 +1,37 @@
+# Render Blueprint for this service: https://render.com/docs/blueprint-spec
+#
+# From the Render dashboard: New -> Blueprint -> point at this repo. Render will build
+# the Dockerfile below, provision the free Postgres instance, and wire POSTGRES_URL
+# automatically. Set API_KEY and ANTHROPIC_API_KEY (marked sync: false below) in the
+# dashboard after the first deploy.
+services:
+  - type: web
+    name: pizza-service
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: SERVICE_NAME
+        value: pizza-service
+      - key: DB_BACKEND
+        value: postgres
+      - key: POSTGRES_URL
+        fromDatabase:
+          name: pizza-db
+          property: connectionString
+      - key: API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ANTHROPIC_MODEL
+        value: claude-sonnet-5
+      - key: CORS_ALLOW_ORIGINS
+        value: "*"
+
+databases:
+  - name: pizza-db
+    plan: free
+    databaseName: pizza_db
+    user: pizza

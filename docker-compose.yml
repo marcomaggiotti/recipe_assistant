@@ -1,0 +1,25 @@
+# Compose file for running/developing this service locally.
+services:
+  pizza-service:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DB_BACKEND: ${DB_BACKEND:-sqlite}
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: pizza_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pizza_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  pizza_postgres_data:
