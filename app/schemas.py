@@ -45,7 +45,6 @@ class GeneratedRecipe(BaseModel):
     salt_pct: float
     oil_pct: float
     leavening: dict
-    num_balls: int
     ball_weight_g: float
     total_dough_g: float
     ingredients_total: dict

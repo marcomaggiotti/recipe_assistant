@@ -105,7 +105,8 @@ def test_api_generate_endpoint():
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["num_balls"] == 3
+    assert "num_balls" not in body
+    assert body["ingredients_per_ball"]["flour_g"] == pytest.approx(body["ingredients_total"]["flour_g"] / 3, abs=0.1)
     assert body["style_attribution"]["author"] == "Tony Gemignani"
 
 
