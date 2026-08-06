@@ -3,13 +3,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from ..auth import require_api_key
 from ..config import get_settings
 from ..db import build_repository
-from ..recipe import STYLE_LIBRARY
 from ..recipe import compute_recipe as _compute_recipe
 from ..schemas import GeneratedRecipe, RecipeGenerateRequest, StyleInfo
+from ..styles import build_style_store
 
 router = APIRouter(prefix="/recipes", tags=["recipes"], dependencies=[Depends(require_api_key)])
 
 _repo = None
+_style_store = None
 
 
 def get_repo():
@@ -19,12 +20,23 @@ def get_repo():
     return _repo
 
 
+def get_style_store():
+    global _style_store
+    if _style_store is None:
+        _style_store = build_style_store(get_settings())
+    return _style_store
+
+
 def compute_recipe(request: RecipeGenerateRequest) -> dict:
+    style_defaults = get_style_store().get(request.style)
+    if style_defaults is None:
+        raise HTTPException(status_code=400, detail=f"unknown style '{request.style}'")
     try:
         return _compute_recipe(
             flours=[f.model_dump() for f in request.flours],
             technique=request.technique,
             style=request.style,
+            style_defaults=style_defaults,
             hydration_pct=request.hydration_pct,
             salt_pct=request.salt_pct,
             oil_pct=request.oil_pct,
@@ -52,7 +64,7 @@ def list_styles():
             suggested_flours=s["suggested_flours"],
             notes=s["notes"],
         )
-        for key, s in STYLE_LIBRARY.items()
+        for key, s in get_style_store().list().items()
     ]
 
 

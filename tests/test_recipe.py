@@ -64,6 +64,24 @@ def test_unknown_technique_rejected():
         compute_recipe(flours=[{"type": "00 flour", "percent": 100}], technique="bogus")
 
 
+def test_explicit_style_defaults_override_style_library():
+    custom_style = {
+        "label": "Injected style", "author": "Someone", "book": "Some Book",
+        "hydration_pct": 70.0, "salt_pct": 3.0, "oil_pct": 0.0,
+        "technique": "direct", "ball_weight_g": 260.0,
+        "suggested_flours": [], "notes": "from an external store",
+    }
+    result = compute_recipe(
+        flours=[{"type": "00 flour", "percent": 100}],
+        technique="direct",
+        style="not_in_style_library",
+        style_defaults=custom_style,
+    )
+    assert result["hydration_pct"] == 70.0
+    assert result["style"] == "not_in_style_library"
+    assert result["style_attribution"]["author"] == "Someone"
+
+
 def test_all_styles_generate_without_error():
     for style in STYLE_LIBRARY:
         result = compute_recipe(
@@ -131,3 +149,15 @@ def test_api_rejects_bad_technique():
         json={"flours": [{"type": "00 flour", "percent": 100}], "technique": "invalid"},
     )
     assert response.status_code == 422
+
+
+def test_api_rejects_unknown_style():
+    response = client.post(
+        "/recipes/generate",
+        json={
+            "flours": [{"type": "00 flour", "percent": 100}],
+            "technique": "direct",
+            "style": "does_not_exist",
+        },
+    )
+    assert response.status_code == 400

@@ -255,6 +255,7 @@ def compute_recipe(
     flours: list[dict[str, Any]],
     technique: str,
     style: str = "custom",
+    style_defaults: dict[str, Any] | None = None,
     hydration_pct: float | None = None,
     salt_pct: float | None = None,
     oil_pct: float | None = None,
@@ -262,12 +263,17 @@ def compute_recipe(
     num_balls: int = 4,
     ball_weight_g: float | None = None,
 ) -> dict[str, Any]:
+    """style_defaults lets callers pass an already-resolved style (e.g. fetched from
+    the Cosmos-backed StyleStore in styles.py) instead of looking it up in the
+    in-memory STYLE_LIBRARY seed data below.
+    """
     if technique not in TECHNIQUES:
         raise ValueError(f"unknown technique '{technique}', expected one of {TECHNIQUES}")
-    if style not in STYLE_LIBRARY:
-        raise ValueError(f"unknown style '{style}', expected one of {list(STYLE_LIBRARY)}")
+    if style_defaults is None:
+        if style not in STYLE_LIBRARY:
+            raise ValueError(f"unknown style '{style}', expected one of {list(STYLE_LIBRARY)}")
+        style_defaults = STYLE_LIBRARY[style]
 
-    style_defaults = STYLE_LIBRARY[style]
     flours_norm, warnings = normalize_flours(flours)
 
     hydration = hydration_pct if hydration_pct is not None else style_defaults["hydration_pct"]

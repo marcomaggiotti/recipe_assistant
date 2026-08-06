@@ -77,6 +77,17 @@ the style's attribution.
 | `modernist_pizza` | Precision baker's-% formula | Nathan Myhrvold et al. | Modernist Pizza |
 | `custom` | Custom formulation | - | - (generic defaults, override freely) |
 
+This table is seed data (`app/recipe.py`'s `STYLE_LIBRARY`). When `DB_BACKEND=cosmos`,
+the styles live in their own Cosmos container (`COSMOS_STYLES_CONTAINER`, default
+`pizza_styles`) instead of hardcoded in the source - the seed data is written there
+automatically the first time the container is empty, and `GET /recipes/styles` /
+`/recipes/generate` read from Cosmos afterwards. That means you can add, edit, or
+remove styles directly in Cosmos (each document's `id` is the style key, e.g.
+`neapolitan_avpn`, with `label`/`author`/`book`/`hydration_pct`/`salt_pct`/`oil_pct`/
+`technique`/`ball_weight_g`/`suggested_flours`/`notes` fields) without a code change or
+redeploy. Non-Cosmos backends (`sqlite`/`postgres`, and the test suite) just serve the
+seed data directly from memory.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and adjust. Key setting: `DB_BACKEND`:

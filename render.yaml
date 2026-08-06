@@ -30,6 +30,8 @@ services:
         value: ai-agent
       - key: COSMOS_CONTAINER
         value: pizza_recipes
+      - key: COSMOS_STYLES_CONTAINER
+        value: pizza_styles
       - key: API_KEY
         sync: false
       - key: ANTHROPIC_API_KEY

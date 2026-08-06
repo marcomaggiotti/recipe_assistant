@@ -8,6 +8,7 @@ from .config import Settings
 from .db import PizzaRepository
 from .recipe import STYLE_LIBRARY, TECHNIQUES
 from .recipe import compute_recipe as _compute_recipe
+from .styles import StyleStore
 
 TOOLS = [
     {
@@ -105,11 +106,16 @@ SYSTEM_PROMPT = (
 )
 
 
-def _generate(tool_input: dict[str, Any]) -> dict[str, Any]:
+def _generate(style_store: StyleStore, tool_input: dict[str, Any]) -> dict[str, Any]:
+    style = tool_input.get("style", "custom")
+    style_defaults = style_store.get(style)
+    if style_defaults is None:
+        raise ValueError(f"unknown style '{style}'")
     return _compute_recipe(
         flours=tool_input["flours"],
         technique=tool_input["technique"],
-        style=tool_input.get("style", "custom"),
+        style=style,
+        style_defaults=style_defaults,
         hydration_pct=tool_input.get("hydration_pct"),
         salt_pct=tool_input.get("salt_pct"),
         oil_pct=tool_input.get("oil_pct"),
@@ -119,19 +125,19 @@ def _generate(tool_input: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _dispatch(repo: PizzaRepository, name: str, tool_input: dict[str, Any]) -> Any:
+def _dispatch(repo: PizzaRepository, style_store: StyleStore, name: str, tool_input: dict[str, Any]) -> Any:
     try:
         if name == "generate_pizza_recipe":
-            return _generate(tool_input)
+            return _generate(style_store, tool_input)
         if name == "save_pizza_recipe":
-            result = _generate(tool_input)
+            result = _generate(style_store, tool_input)
             return repo.create(tool_input["name"], result)
         if name == "list_pizza_styles":
             return {
                 "styles": [
                     {"key": k, "label": s["label"], "author": s["author"], "book": s["book"],
                      "technique": s["technique"], "notes": s["notes"]}
-                    for k, s in STYLE_LIBRARY.items()
+                    for k, s in style_store.list().items()
                 ]
             }
         if name == "list_pizza_recipes":
@@ -147,7 +153,9 @@ def _dispatch(repo: PizzaRepository, name: str, tool_input: dict[str, Any]) -> A
     return {"error": f"unknown tool {name}"}
 
 
-def run_agent(settings: Settings, repo: PizzaRepository, message: str, history: list[dict]) -> tuple[str, list[dict]]:
+def run_agent(
+    settings: Settings, repo: PizzaRepository, style_store: StyleStore, message: str, history: list[dict]
+) -> tuple[str, list[dict]]:
     if not settings.anthropic_api_key:
         return (
             "Agent chat requires ANTHROPIC_API_KEY to be configured on this service.",
@@ -177,7 +185,7 @@ def run_agent(settings: Settings, repo: PizzaRepository, message: str, history: 
         for block in response.content:
             if block.type != "tool_use":
                 continue
-            result = _dispatch(repo, block.name, block.input)
+            result = _dispatch(repo, style_store, block.name, block.input)
             tool_calls.append({"tool": block.name, "input": block.input, "result": result})
             tool_results.append({
                 "type": "tool_result",

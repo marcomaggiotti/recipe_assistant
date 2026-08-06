@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     cosmos_key: str = ""
     cosmos_database: str = "ai-agent"
     cosmos_container: str = "pizza_recipes"
+    cosmos_styles_container: str = "pizza_styles"
 
     # sqlite fallback for zero-config local dev
     sqlite_path: str = "./pizza_service.db"
