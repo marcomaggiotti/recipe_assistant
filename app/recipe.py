@@ -260,12 +260,15 @@ def compute_recipe(
     salt_pct: float | None = None,
     oil_pct: float | None = None,
     yeast_pct: float | None = None,
-    num_balls: int = 4,
     ball_weight_g: float | None = None,
 ) -> dict[str, Any]:
-    """style_defaults lets callers pass an already-resolved style (e.g. fetched from
-    the Cosmos-backed StyleStore in styles.py) instead of looking it up in the
-    in-memory STYLE_LIBRARY seed data below.
+    """Computes the dough formula for a SINGLE dough ball of `ball_weight_g` grams -
+    this is the reusable "recipe", independent of how many balls you actually want to
+    make. Use scale_recipe() to expand it into a batch of N balls.
+
+    style_defaults lets callers pass an already-resolved style (e.g. fetched from the
+    Cosmos-backed StyleStore in styles.py) instead of looking it up in the in-memory
+    STYLE_LIBRARY seed data below.
     """
     if technique not in TECHNIQUES:
         raise ValueError(f"unknown technique '{technique}', expected one of {TECHNIQUES}")
@@ -281,11 +284,11 @@ def compute_recipe(
     oil = oil_pct if oil_pct is not None else style_defaults.get("oil_pct", 0.0)
     ball_weight = ball_weight_g if ball_weight_g is not None else style_defaults.get("ball_weight_g", 250.0)
 
-    total_dough_g = ball_weight * num_balls
-    # Total dough mass = flour + water + salt + oil (yeast/starter mass reported separately,
-    # since for preferment techniques it is drawn from the flour/water already counted).
+    # One ball's dough mass = flour + water + salt + oil (yeast/starter mass reported
+    # separately, since for preferment techniques it is drawn from the flour/water
+    # already counted).
     parts = 1 + hydration / 100 + salt / 100 + oil / 100
-    flour_total_g = total_dough_g / parts
+    flour_total_g = ball_weight / parts
     water_total_g = flour_total_g * hydration / 100
     salt_g = flour_total_g * salt / 100
     oil_g = flour_total_g * oil / 100 if oil else 0.0
@@ -298,13 +301,12 @@ def compute_recipe(
         for f in flours_norm
     ]
 
-    ingredients_total = {
+    ingredients_per_ball = {
         "flour_g": round(flour_total_g, 1),
         "water_g": round(water_total_g, 1),
         "salt_g": round(salt_g, 1),
         "oil_g": round(oil_g, 1),
     }
-    ingredients_per_ball = {k: round(v / num_balls, 1) for k, v in ingredients_total.items()}
 
     return {
         "flours": flours_out,
@@ -313,10 +315,7 @@ def compute_recipe(
         "salt_pct": salt,
         "oil_pct": oil,
         "leavening": leavening,
-        "num_balls": num_balls,
         "ball_weight_g": ball_weight,
-        "total_dough_g": round(total_dough_g, 1),
-        "ingredients_total": ingredients_total,
         "ingredients_per_ball": ingredients_per_ball,
         "fermentation_schedule": _fermentation_schedule(technique),
         "style": style,
@@ -329,3 +328,32 @@ def compute_recipe(
         },
         "warnings": warnings,
     }
+
+
+# leavening dict keys that hold gram quantities and need scaling with batch size (the
+# rest - "type", "rest_hours", "percent_of_flour", "note" - are ratios/text, unaffected).
+_LEAVENING_GRAM_KEYS = (
+    "grams", "preferment_flour_g", "preferment_water_g", "preferment_yeast_g",
+    "remaining_flour_g", "remaining_water_g",
+)
+
+
+def scale_recipe(recipe: dict[str, Any], num_balls: int) -> dict[str, Any]:
+    """Expands a single-ball recipe (as returned by compute_recipe(), or a saved
+    recipe fetched from a PizzaRepository - both are per-one-ball formulas) into a
+    batch of `num_balls` balls. Percentages, technique, fermentation schedule, and
+    style attribution don't change with batch size; ingredients_per_ball is left
+    untouched too, so it stays a stable per-ball reference regardless of num_balls.
+    """
+    if num_balls < 1:
+        raise ValueError("num_balls must be at least 1")
+    scaled = dict(recipe)
+    scaled["num_balls"] = num_balls
+    scaled["total_dough_g"] = round(recipe["ball_weight_g"] * num_balls, 1)
+    scaled["flours"] = [{**f, "grams": round(f["grams"] * num_balls, 1)} for f in recipe["flours"]]
+    scaled["leavening"] = {
+        k: (round(v * num_balls, 2) if k in _LEAVENING_GRAM_KEYS else v)
+        for k, v in recipe["leavening"].items()
+    }
+    scaled["ingredients_total"] = {k: round(v * num_balls, 1) for k, v in recipe["ingredients_per_ball"].items()}
+    return scaled

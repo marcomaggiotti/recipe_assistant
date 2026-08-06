@@ -16,10 +16,11 @@ as a standalone, self-contained service (own dependencies, Dockerfile, config).
 |--------|-------------------|--------------------------------------------------------------|
 | GET    | `/health`         | Liveness check                                                |
 | GET    | `/recipes/styles` | List the built-in named styles and their chef/book attribution |
-| POST   | `/recipes/generate` | Compute a recipe without saving it                           |
-| POST   | `/recipes`        | Compute a recipe and save it                                  |
+| GET    | `/recipes/flours` | List the international flour catalogue                        |
+| POST   | `/recipes/generate` | Compute a recipe (`?num_balls=N`, default 1) without saving it |
+| POST   | `/recipes`        | Compute the single-ball formula and save it                   |
 | GET    | `/recipes`        | List saved recipes (`limit`, `offset`)                        |
-| GET    | `/recipes/{id}`   | Get one saved recipe                                          |
+| GET    | `/recipes/{id}`   | Get one saved recipe (`?num_balls=N`, default 1)               |
 | DELETE | `/recipes/{id}`   | Delete a saved recipe                                          |
 | POST   | `/agent/chat`     | Natural-language agent chat over recipe generation/storage    |
 
@@ -28,27 +29,31 @@ environment; leave it empty for local dev.
 
 ## The recipe model
 
-Request body for `/recipes/generate` and `/recipes`:
+A recipe is always a **single dough ball's formula** - how many balls you want is a
+separate, query-time concern (`?num_balls=N` on `/recipes/generate` and
+`GET /recipes/{id}`, default 1), not part of what you save. Request body for
+`/recipes/generate` and `/recipes`:
 
 ```json
 {
   "name": "Friday pizza night",
   "flours": [
-    {"type": "Italian 00 flour", "percent": 80},
-    {"type": "Whole wheat", "percent": 20}
+    {"type": "soft_wheat_00", "percent": 80},
+    {"type": "whole_wheat", "percent": 20}
   ],
   "technique": "cold_ferment_48h",
   "style": "ny_style",
   "hydration_pct": 63,
   "salt_pct": 2.5,
   "oil_pct": 3,
-  "num_balls": 4,
   "ball_weight_g": 280
 }
 ```
 
 - `flours` - baker's percentages of the blend relative to each other; they don't need to
-  sum to exactly 100, they're normalized (with a warning) if not.
+  sum to exactly 100, they're normalized (with a warning) if not. Every `type` must
+  match an entry in the flour catalogue (see below) - its `id` or one of its localized
+  names/codes; anything else is rejected with a 400.
 - `technique` - one of `direct`, `same_day`, `poolish`, `biga`, `sourdough`,
   `cold_ferment_24h`, `cold_ferment_48h`, `cold_ferment_72h`. Drives the yeast/preferment
   math and the generated fermentation schedule.
@@ -59,10 +64,29 @@ Request body for `/recipes/generate` and `/recipes`:
 - Any of `hydration_pct`, `salt_pct`, `oil_pct`, `yeast_pct`, `ball_weight_g` you *do*
   set overrides the style default.
 
-The response includes the normalized flour blend with grams, total dough/per-ball
-ingredient weights, the leavening breakdown (commercial yeast %, or a poolish/biga
-preferment split, or a sourdough starter %), a step-by-step fermentation schedule, and
-the style's attribution.
+The response includes the normalized flour blend with grams, the leavening breakdown
+(commercial yeast %, or a poolish/biga preferment split, or a sourdough starter %) -
+both scaled to `num_balls` - plus `ingredients_per_ball` (a constant single-ball
+reference, regardless of `num_balls`), `ingredients_total` (the full batch), a
+step-by-step fermentation schedule, and the style's attribution.
+
+### International flour catalogue
+
+Every `flours[].type` cited in a request must match an entry from `GET /recipes/flours`
+- matched case-insensitively against that entry's `id` or any of its localized
+names/codes, so you can use whatever your country calls it: `"00"`, `"Farina 00"`,
+`"Weizenmehl 405"`, and `"T45"` all resolve to the same `soft_wheat_00` flour. The
+catalogue covers wheat (soft wheat types 00/0/1/2, whole wheat, Manitoba, durum,
+Italian ancient-grain landraces), rye, oats, gluten-free cereals (rice, corn, millet,
+sorghum, teff, ...), legumes, nuts/seeds, tubers/starches, and a few specialty flours -
+~60 entries in total, each with `id`, `category`, `gluten`, `bread`/`pizza` suitability,
+`max_blend_pct`, and localized `names` (en/it/fr/de).
+
+This catalogue is seed data (`app/flours.py`'s `FLOUR_CATALOG`). When `DB_BACKEND=cosmos`,
+it lives in its own Cosmos container (`COSMOS_FLOURS_CONTAINER`, default `pizza_flours`)
+instead of hardcoded in the source, seeded automatically the first time that container
+is empty - same pattern as the style library below. Non-Cosmos backends (`sqlite`/
+`postgres`, and the test suite) serve the seed data directly from memory.
 
 ### Built-in styles (pizza-chef / cookbook references)
 

@@ -6,20 +6,27 @@ from typing import Any
 
 from .config import Settings
 from .db import PizzaRepository
+from .flours import FlourCatalogStore
 from .recipe import STYLE_LIBRARY, TECHNIQUES
 from .recipe import compute_recipe as _compute_recipe
+from .recipe import scale_recipe
 from .styles import StyleStore
 
 TOOLS = [
     {
         "name": "generate_pizza_recipe",
         "description": (
-            "Compute a scaled pizza dough recipe from a flour blend (baker's percentages "
-            "that don't need to sum to exactly 100 - they get normalized), a fermentation "
+            "Compute a pizza dough recipe from a flour blend (baker's percentages that "
+            "don't need to sum to exactly 100 - they get normalized), a fermentation "
             "technique, and an optional named style anchored to a real pizza-chef/cookbook "
-            "reference. Any of hydration/salt/oil/yeast %, ball weight, or number of balls "
-            "left unset falls back to the chosen style's defaults ('custom' style = generic "
-            "defaults with no attribution)."
+            "reference. Every flours[].type must match an entry in the flour catalogue "
+            "(list_pizza_flours) - its id or one of its localized names/codes (e.g. '00', "
+            "'Farina 00', 'Weizenmehl 405', 'T45' all resolve to the same flour); unrecognized "
+            "flour names are rejected. Any of hydration/salt/oil/yeast % or ball weight left "
+            "unset falls back to the chosen style's defaults ('custom' style = generic "
+            "defaults with no attribution). The formula is always for a single dough ball; "
+            "pass num_balls to scale ingredient quantities up to a batch of that many balls "
+            "(defaults to 1)."
         ),
         "input_schema": {
             "type": "object",
@@ -38,15 +45,19 @@ TOOLS = [
                 "salt_pct": {"type": "number"},
                 "oil_pct": {"type": "number"},
                 "yeast_pct": {"type": "number"},
-                "num_balls": {"type": "integer", "default": 4},
                 "ball_weight_g": {"type": "number"},
+                "num_balls": {"type": "integer", "default": 1, "description": "Batch size to scale the formula to"},
             },
             "required": ["flours", "technique"],
         },
     },
     {
         "name": "save_pizza_recipe",
-        "description": "Save a previously generated recipe result (or generate-and-save in one step) under a name.",
+        "description": (
+            "Save a single-ball dough formula (generate-and-save in one step) under a name. "
+            "Always saves one ball's worth - use num_balls on get_pizza_recipe later to "
+            "scale it to a batch when it's actually time to bake."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -65,7 +76,6 @@ TOOLS = [
                 "salt_pct": {"type": "number"},
                 "oil_pct": {"type": "number"},
                 "yeast_pct": {"type": "number"},
-                "num_balls": {"type": "integer", "default": 4},
                 "ball_weight_g": {"type": "number"},
             },
             "required": ["name", "flours", "technique"],
@@ -77,8 +87,17 @@ TOOLS = [
         "input_schema": {"type": "object", "properties": {}},
     },
     {
+        "name": "list_pizza_flours",
+        "description": (
+            "List the international flour catalogue. Every flours[].type on "
+            "generate_pizza_recipe/save_pizza_recipe must match one of these entries' id "
+            "or one of its localized names/codes (names differ by country)."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "list_pizza_recipes",
-        "description": "List saved pizza recipes.",
+        "description": "List saved pizza recipes (each as a single-ball formula).",
         "input_schema": {
             "type": "object",
             "properties": {"limit": {"type": "integer", "default": 20}, "offset": {"type": "integer", "default": 0}},
@@ -86,8 +105,15 @@ TOOLS = [
     },
     {
         "name": "get_pizza_recipe",
-        "description": "Get a saved pizza recipe by id.",
-        "input_schema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]},
+        "description": "Get a saved pizza recipe by id, scaled to num_balls balls (defaults to 1).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "num_balls": {"type": "integer", "default": 1, "description": "Batch size to scale the formula to"},
+            },
+            "required": ["id"],
+        },
     },
     {
         "name": "delete_pizza_recipe",
@@ -106,11 +132,16 @@ SYSTEM_PROMPT = (
 )
 
 
-def _generate(style_store: StyleStore, tool_input: dict[str, Any]) -> dict[str, Any]:
+def _generate(style_store: StyleStore, flour_store: FlourCatalogStore, tool_input: dict[str, Any]) -> dict[str, Any]:
     style = tool_input.get("style", "custom")
     style_defaults = style_store.get(style)
     if style_defaults is None:
         raise ValueError(f"unknown style '{style}'")
+
+    unknown = [f["type"] for f in tool_input["flours"] if flour_store.resolve(f["type"]) is None]
+    if unknown:
+        raise ValueError(f"unknown flour type(s): {', '.join(unknown)} - see list_pizza_flours for the allowed catalogue")
+
     return _compute_recipe(
         flours=tool_input["flours"],
         technique=tool_input["technique"],
@@ -120,18 +151,21 @@ def _generate(style_store: StyleStore, tool_input: dict[str, Any]) -> dict[str, 
         salt_pct=tool_input.get("salt_pct"),
         oil_pct=tool_input.get("oil_pct"),
         yeast_pct=tool_input.get("yeast_pct"),
-        num_balls=tool_input.get("num_balls", 4),
         ball_weight_g=tool_input.get("ball_weight_g"),
     )
 
 
-def _dispatch(repo: PizzaRepository, style_store: StyleStore, name: str, tool_input: dict[str, Any]) -> Any:
+def _dispatch(
+    repo: PizzaRepository, style_store: StyleStore, flour_store: FlourCatalogStore,
+    name: str, tool_input: dict[str, Any],
+) -> Any:
     try:
         if name == "generate_pizza_recipe":
-            return _generate(style_store, tool_input)
+            base = _generate(style_store, flour_store, tool_input)
+            return scale_recipe(base, tool_input.get("num_balls", 1))
         if name == "save_pizza_recipe":
-            result = _generate(style_store, tool_input)
-            return repo.create(tool_input["name"], result)
+            base = _generate(style_store, flour_store, tool_input)
+            return repo.create(tool_input["name"], base)
         if name == "list_pizza_styles":
             return {
                 "styles": [
@@ -140,12 +174,16 @@ def _dispatch(repo: PizzaRepository, style_store: StyleStore, name: str, tool_in
                     for k, s in style_store.list().items()
                 ]
             }
+        if name == "list_pizza_flours":
+            return {"flours": flour_store.list()}
         if name == "list_pizza_recipes":
             items, total = repo.list(tool_input.get("limit", 20), tool_input.get("offset", 0))
             return {"items": items, "count": total}
         if name == "get_pizza_recipe":
             record = repo.get(tool_input["id"])
-            return record if record else {"error": "not found"}
+            if not record:
+                return {"error": "not found"}
+            return scale_recipe(record, tool_input.get("num_balls", 1))
         if name == "delete_pizza_recipe":
             return {"deleted": repo.delete(tool_input["id"])}
     except ValueError as exc:
@@ -154,7 +192,8 @@ def _dispatch(repo: PizzaRepository, style_store: StyleStore, name: str, tool_in
 
 
 def run_agent(
-    settings: Settings, repo: PizzaRepository, style_store: StyleStore, message: str, history: list[dict]
+    settings: Settings, repo: PizzaRepository, style_store: StyleStore, flour_store: FlourCatalogStore,
+    message: str, history: list[dict],
 ) -> tuple[str, list[dict]]:
     if not settings.anthropic_api_key:
         return (
@@ -185,7 +224,7 @@ def run_agent(
         for block in response.content:
             if block.type != "tool_use":
                 continue
-            result = _dispatch(repo, style_store, block.name, block.input)
+            result = _dispatch(repo, style_store, flour_store, block.name, block.input)
             tool_calls.append({"tool": block.name, "input": block.input, "result": result})
             tool_results.append({
                 "type": "tool_result",
