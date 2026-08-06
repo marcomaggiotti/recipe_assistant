@@ -1,9 +1,14 @@
 # Render Blueprint for this service: https://render.com/docs/blueprint-spec
 #
 # From the Render dashboard: New -> Blueprint -> point at this repo. Render will build
-# the Dockerfile below, provision the free Postgres instance, and wire POSTGRES_URL
-# automatically. Set API_KEY and ANTHROPIC_API_KEY (marked sync: false below) in the
-# dashboard after the first deploy.
+# the Dockerfile below and deploy the web service against Azure Cosmos DB.
+#
+# Cosmos DB itself is NOT provisioned by this blueprint (Render doesn't host Cosmos -
+# it's an Azure service). Create a Cosmos DB account (NoSQL API) in the Azure Portal
+# first, then set COSMOS_ENDPOINT and COSMOS_KEY below (marked sync: false - set them,
+# along with API_KEY and ANTHROPIC_API_KEY, in the Render dashboard after the first
+# deploy since they're secrets). See README.md's "Deploy to Render" section for the
+# step-by-step.
 services:
   - type: web
     name: pizza-service
@@ -16,11 +21,15 @@ services:
       - key: SERVICE_NAME
         value: pizza-service
       - key: DB_BACKEND
-        value: postgres
-      - key: POSTGRES_URL
-        fromDatabase:
-          name: pizza-db
-          property: connectionString
+        value: cosmos
+      - key: COSMOS_ENDPOINT
+        sync: false
+      - key: COSMOS_KEY
+        sync: false
+      - key: COSMOS_DATABASE
+        value: ai-agent
+      - key: COSMOS_CONTAINER
+        value: pizza_recipes
       - key: API_KEY
         sync: false
       - key: ANTHROPIC_API_KEY
@@ -30,8 +39,11 @@ services:
       - key: CORS_ALLOW_ORIGINS
         value: "*"
 
-databases:
-  - name: pizza-db
-    plan: free
-    databaseName: pizza_db
-    user: pizza
+# To use Render's managed Postgres instead, switch DB_BACKEND to "postgres", drop the
+# COSMOS_* env vars above, add a POSTGRES_URL env var with `fromDatabase: {name: pizza-db,
+# property: connectionString}`, and add:
+# databases:
+#   - name: pizza-db
+#     plan: free
+#     databaseName: pizza_db
+#     user: pizza

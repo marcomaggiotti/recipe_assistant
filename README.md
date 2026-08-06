@@ -85,7 +85,9 @@ Copy `.env.example` to `.env` and adjust. Key setting: `DB_BACKEND`:
 - `postgres` - any Postgres-wire-compatible database, including a **Render**
   [managed Postgres](https://render.com/pricing#postgresql) instance - just set
   `POSTGRES_URL` to Render's external connection string.
-- `cosmos` - **Azure Cosmos DB** (NoSQL API).
+- `cosmos` - **Azure Cosmos DB** (NoSQL API) - set `COSMOS_ENDPOINT` and `COSMOS_KEY`
+  from an existing Cosmos account; `COSMOS_DATABASE`/`COSMOS_CONTAINER` are
+  auto-created if missing.
 
 `ANTHROPIC_API_KEY` enables `/agent/chat`; without it the endpoint returns a message
 saying the key is missing instead of erroring.
@@ -109,17 +111,42 @@ docker compose --profile postgres up --build
 ## Deploy to Render
 
 This folder ships a `render.yaml` [Blueprint](https://render.com/docs/blueprint-spec) that
-provisions the web service (built from the included `Dockerfile`) plus a free managed
-Postgres database, wired together automatically.
+deploys the web service (built from the included `Dockerfile`) against **Azure Cosmos
+DB**. Render doesn't host Cosmos DB itself (it's an Azure service), so you provision the
+Cosmos account in Azure first and just point the Render service at it.
+
+### 1. Create the Cosmos DB account (Azure Portal)
+
+1. In the [Azure Portal](https://portal.azure.com), create an **Azure Cosmos DB**
+   resource and pick the **NoSQL** API (not MongoDB/Cassandra/etc.) - the service uses
+   the `azure-cosmos` SDK, which speaks the NoSQL API. The free tier (1000 RU/s +
+   25GB) is enough for this service.
+2. Once it's provisioned, open **Settings -> Keys** on the Cosmos account and copy:
+   - **URI** -> this is `COSMOS_ENDPOINT`
+   - **PRIMARY KEY** -> this is `COSMOS_KEY`
+3. You don't need to pre-create the database/container - the service calls
+   `create_database_if_not_exists` / `create_container_if_not_exists` on startup using
+   `COSMOS_DATABASE` (default `ai-agent`) and `COSMOS_CONTAINER` (default
+   `pizza_recipes`).
+
+### 2. Deploy on Render
 
 1. Push this repo to GitHub (already the case if you're reading this in the repo).
-2. In the Render dashboard: **New -> Blueprint**, and point it at this repo.
-3. Render provisions `pizza-db` (Postgres) and the `pizza-service` web service, and
-   wires `POSTGRES_URL` from the database automatically.
-4. After the first deploy, set `API_KEY` and `ANTHROPIC_API_KEY` in the service's
-   **Environment** tab (left blank in the blueprint on purpose, since they're secrets).
-5. Render calls `GET /health` for its health check; the service is live at
-   `https://<service-name>.onrender.com` once that passes.
+2. In the Render dashboard: **New -> Blueprint**, and point it at this repo. It reads
+   `render.yaml` and creates the `pizza-service` web service with `DB_BACKEND=cosmos`
+   pre-set.
+3. After the first deploy, open the service's **Environment** tab and set the values
+   left blank in the blueprint on purpose (they're secrets):
+   - `COSMOS_ENDPOINT`, `COSMOS_KEY` - from step 1
+   - `API_KEY` - your own value, to require `X-API-Key` on mutating requests
+   - `ANTHROPIC_API_KEY` - to enable `/agent/chat`
+4. Render calls `GET /health` for its health check; the service is live at
+   `https://<service-name>.onrender.com` once that passes and redeploys after you save
+   the env vars.
+
+Prefer Render's own managed Postgres instead of Cosmos? Switch `DB_BACKEND` back to
+`postgres` and see the commented-out block at the bottom of `render.yaml` for the
+`databases:` section to add back.
 
 You can also skip the blueprint and create the web service manually (Docker runtime)
 and point `DB_BACKEND=sqlite` at it for a no-database quick deploy - recipes just
