@@ -46,6 +46,24 @@ class RecipeGenerateRequest(BaseModel):
     oil_pct: float | None = Field(default=None, ge=0, le=15)
     yeast_pct: float | None = Field(default=None, ge=0, le=5)
     ball_weight_g: float | None = Field(default=None, gt=0)
+    poolish_percentage: float | None = Field(
+        default=None, ge=0, le=100,
+        description="Baker's % of the poolish preferment relative to total flour weight "
+                    "(grams of preferment flour per 100g of total flour). Only applies when "
+                    "technique='poolish'; defaults to 40 when unset.",
+    )
+    biga_percentage: float | None = Field(
+        default=None, ge=0, le=100,
+        description="Baker's % of the biga preferment relative to total flour weight "
+                    "(grams of preferment flour per 100g of total flour). Only applies when "
+                    "technique='biga'; defaults to 40 when unset.",
+    )
+    sourdough_percentage: float | None = Field(
+        default=None, ge=0, le=100,
+        description="Baker's % of the mature sourdough starter relative to total flour weight "
+                    "(grams of starter per 100g of total flour). Only applies when "
+                    "technique='sourdough'; defaults to 20 when unset.",
+    )
 
 
 class StyleAttribution(BaseModel):

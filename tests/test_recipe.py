@@ -93,6 +93,57 @@ def test_preferment_techniques_build_a_preferment():
         )
         assert result["leavening"]["type"] == technique
         assert result["leavening"]["preferment_flour_g"] > 0
+        assert result["leavening"]["percent_of_flour"] == 40.0  # default when unset
+
+
+def test_poolish_percentage_overrides_the_default_and_scales_preferment_flour():
+    result = compute_recipe(
+        flours=[{"type": "Bread flour", "percent": 65}, {"type": "00 flour", "percent": 35}],
+        technique="poolish",
+        poolish_percentage=40,
+        hydration_pct=76,
+        ball_weight_g=1000,
+    )
+    leavening = result["leavening"]
+    assert leavening["percent_of_flour"] == 40
+    assert leavening["preferment_flour_g"] == pytest.approx(
+        result["ingredients_per_ball"]["flour_g"] * 0.40, abs=0.1
+    )
+    # biga_percentage/sourdough_percentage don't apply to a poolish recipe
+    other = compute_recipe(
+        flours=[{"type": "Bread flour", "percent": 100}],
+        technique="poolish",
+        biga_percentage=70,
+        sourdough_percentage=10,
+        hydration_pct=65,
+        ball_weight_g=280,
+    )
+    assert other["leavening"]["percent_of_flour"] == 40.0
+
+
+def test_biga_percentage_overrides_the_default():
+    result = compute_recipe(
+        flours=[{"type": "Bread flour", "percent": 100}],
+        technique="biga",
+        biga_percentage=55,
+        hydration_pct=65,
+        ball_weight_g=280,
+    )
+    assert result["leavening"]["percent_of_flour"] == 55
+
+
+def test_sourdough_percentage_overrides_the_default():
+    result = compute_recipe(
+        flours=[{"type": "Bread flour", "percent": 100}],
+        technique="sourdough",
+        sourdough_percentage=25,
+        hydration_pct=68,
+        ball_weight_g=260,
+    )
+    assert result["leavening"]["percent_of_flour"] == 25
+    assert result["leavening"]["grams"] == pytest.approx(
+        result["ingredients_per_ball"]["flour_g"] * 0.25, abs=0.1
+    )
 
 
 def test_unknown_technique_rejected():
@@ -276,3 +327,38 @@ def test_api_generate_warns_on_mismatched_ash_pct():
     )
     assert response.status_code == 200
     assert any("ash%" in w for w in response.json()["warnings"])
+
+
+def test_api_generate_accepts_poolish_percentage():
+    response = client.post(
+        "/recipes/generate",
+        json={
+            "flours": [{"description": SOFT_WHEAT_00, "percent": 65}, {"description": WHOLE_WHEAT, "percent": 35}],
+            "technique": "poolish",
+            "poolish_percentage": 40,
+            "hydration_pct": 76,
+            "ball_weight_g": 1000,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["leavening"]["percent_of_flour"] == 40
+
+
+def test_api_generate_accepts_biga_and_sourdough_percentage():
+    biga = client.post(
+        "/recipes/generate",
+        json={"flours": [{"description": SOFT_WHEAT_00, "percent": 100}], "technique": "biga", "biga_percentage": 55},
+    )
+    assert biga.status_code == 200
+    assert biga.json()["leavening"]["percent_of_flour"] == 55
+
+    sourdough = client.post(
+        "/recipes/generate",
+        json={
+            "flours": [{"description": SOFT_WHEAT_00, "percent": 100}],
+            "technique": "sourdough",
+            "sourdough_percentage": 25,
+        },
+    )
+    assert sourdough.status_code == 200
+    assert sourdough.json()["leavening"]["percent_of_flour"] == 25

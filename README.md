@@ -41,12 +41,13 @@ separate, query-time concern (`?num_balls=N` on `/recipes/generate` and
     {"description": "soft_wheat_00", "ash%": 0.55, "percent": 80},
     {"description": "whole_wheat", "percent": 20}
   ],
-  "technique": "cold_ferment_48h",
+  "technique": "poolish",
   "style": "ny_style",
   "hydration_pct": 63,
   "salt_pct": 2.5,
   "oil_pct": 3,
-  "ball_weight_g": 280
+  "ball_weight_g": 280,
+  "poolish_percentage": 40
 }
 ```
 
@@ -66,12 +67,19 @@ separate, query-time concern (`?num_balls=N` on `/recipes/generate` and
   `custom` (generic defaults, no attribution).
 - Any of `hydration_pct`, `salt_pct`, `oil_pct`, `yeast_pct`, `ball_weight_g` you *do*
   set overrides the style default.
+- `poolish_percentage`/`biga_percentage`/`sourdough_percentage` - the preferment's baker's
+  % of total flour weight (grams of preferment flour per 100g of total flour, e.g. the
+  baguette formula's "Poolish 400g / 40%"). Only the one matching `technique` has any
+  effect; each defaults to 40 (poolish/biga) or 20 (sourdough) when left unset. The
+  response's `leavening.percent_of_flour` echoes back whichever value (set or default)
+  was actually used.
 
 The response includes the normalized flour blend with grams, the leavening breakdown
-(commercial yeast %, or a poolish/biga preferment split, or a sourdough starter %) -
-both scaled to `num_balls` - plus `ingredients_per_ball` (a constant single-ball
-reference, regardless of `num_balls`), `ingredients_total` (the full batch), a
-step-by-step fermentation schedule, and the style's attribution.
+(commercial yeast %, or a poolish/biga preferment split, or a sourdough starter %, each
+carrying its own `percent_of_flour`) - both scaled to `num_balls` - plus
+`ingredients_per_ball` (a constant single-ball reference, regardless of `num_balls`),
+`ingredients_total` (the full batch), a step-by-step fermentation schedule, and the
+style's attribution.
 
 ### International flour catalogue
 

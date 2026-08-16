@@ -26,7 +26,10 @@ TOOLS = [
             "milled wheat flours (e.g. 0.55 for Italian Tipo 00) - it's cross-checked against "
             "the resolved flour's ash range and helps disambiguate. Any of hydration/salt/oil/"
             "yeast % or ball weight left unset falls back to the chosen style's defaults "
-            "('custom' style = generic defaults with no attribution). The formula is always for "
+            "('custom' style = generic defaults with no attribution). poolish_percentage/"
+            "biga_percentage/sourdough_percentage set the preferment's baker's % of total flour "
+            "weight - only the one matching `technique` has any effect, and each defaults to 40 "
+            "(poolish/biga) or 20 (sourdough) when left unset. The formula is always for "
             "a single dough ball; pass num_balls to scale ingredient quantities up to a batch of "
             "that many balls (defaults to 1)."
         ),
@@ -52,6 +55,9 @@ TOOLS = [
                 "oil_pct": {"type": "number"},
                 "yeast_pct": {"type": "number"},
                 "ball_weight_g": {"type": "number"},
+                "poolish_percentage": {"type": "number", "description": "Poolish baker's % of total flour (technique='poolish' only), default 40"},
+                "biga_percentage": {"type": "number", "description": "Biga baker's % of total flour (technique='biga' only), default 40"},
+                "sourdough_percentage": {"type": "number", "description": "Sourdough starter baker's % of total flour (technique='sourdough' only), default 20"},
                 "num_balls": {"type": "integer", "default": 1, "description": "Batch size to scale the formula to"},
             },
             "required": ["flours", "technique"],
@@ -87,6 +93,9 @@ TOOLS = [
                 "oil_pct": {"type": "number"},
                 "yeast_pct": {"type": "number"},
                 "ball_weight_g": {"type": "number"},
+                "poolish_percentage": {"type": "number", "description": "Poolish baker's % of total flour (technique='poolish' only), default 40"},
+                "biga_percentage": {"type": "number", "description": "Biga baker's % of total flour (technique='biga' only), default 40"},
+                "sourdough_percentage": {"type": "number", "description": "Sourdough starter baker's % of total flour (technique='sourdough' only), default 20"},
             },
             "required": ["name", "flours", "technique"],
         },
@@ -166,6 +175,9 @@ def _generate(style_store: StyleStore, flour_store: FlourCatalogStore, tool_inpu
         oil_pct=tool_input.get("oil_pct"),
         yeast_pct=tool_input.get("yeast_pct"),
         ball_weight_g=tool_input.get("ball_weight_g"),
+        poolish_percentage=tool_input.get("poolish_percentage"),
+        biga_percentage=tool_input.get("biga_percentage"),
+        sourdough_percentage=tool_input.get("sourdough_percentage"),
     )
 
 
