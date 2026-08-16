@@ -114,8 +114,9 @@ _DIRECT_YEAST_PCT = {
     "cold_ferment_72h": 0.08,
 }
 
-_PREFERMENT_FLOUR_PCT = 40.0  # % of total flour built into a poolish/biga
-_SOURDOUGH_STARTER_PCT = 20.0  # % of total flour, as mature 100%-hydration starter
+_POOLISH_FLOUR_PCT = 40.0  # % of total flour built into a poolish, unless overridden
+_BIGA_FLOUR_PCT = 40.0  # % of total flour built into a biga, unless overridden
+_SOURDOUGH_STARTER_PCT = 20.0  # % of total flour, as mature 100%-hydration starter, unless overridden
 
 
 def normalize_flours(flours: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
@@ -130,9 +131,17 @@ def normalize_flours(flours: list[dict[str, Any]]) -> tuple[list[dict[str, Any]]
     return flours, warnings
 
 
-def _leavening(technique: str, flour_total_g: float, water_total_g: float, yeast_pct_override: float | None):
+def _leavening(
+    technique: str, flour_total_g: float, water_total_g: float, yeast_pct_override: float | None,
+    poolish_pct_override: float | None = None,
+    biga_pct_override: float | None = None,
+    sourdough_pct_override: float | None = None,
+):
     if technique in ("poolish", "biga"):
-        preferment_flour_g = flour_total_g * _PREFERMENT_FLOUR_PCT / 100
+        default_pct = _POOLISH_FLOUR_PCT if technique == "poolish" else _BIGA_FLOUR_PCT
+        override_pct = poolish_pct_override if technique == "poolish" else biga_pct_override
+        preferment_pct = override_pct if override_pct is not None else default_pct
+        preferment_flour_g = flour_total_g * preferment_pct / 100
         preferment_hydration = 100.0 if technique == "poolish" else 50.0
         preferment_water_g = preferment_flour_g * preferment_hydration / 100
         preferment_yeast_pct = 0.2 if technique == "poolish" else 0.3
@@ -143,10 +152,11 @@ def _leavening(technique: str, flour_total_g: float, water_total_g: float, yeast
             remaining_water_g = 0.0
             warnings.append(
                 "hydration too low to cover the preferment's water at this technique's "
-                "default preferment size; remaining-dough water floored at 0g"
+                "preferment size; remaining-dough water floored at 0g"
             )
         return {
             "type": technique,
+            "percent_of_flour": preferment_pct,
             "preferment_flour_g": round(preferment_flour_g, 1),
             "preferment_water_g": round(preferment_water_g, 1),
             "preferment_yeast_g": round(preferment_yeast_g, 2),
@@ -156,11 +166,12 @@ def _leavening(technique: str, flour_total_g: float, water_total_g: float, yeast
         }, warnings
 
     if technique == "sourdough":
-        starter_g = flour_total_g * _SOURDOUGH_STARTER_PCT / 100
+        starter_pct = sourdough_pct_override if sourdough_pct_override is not None else _SOURDOUGH_STARTER_PCT
+        starter_g = flour_total_g * starter_pct / 100
         return {
             "type": "mature sourdough starter (100% hydration)",
             "grams": round(starter_g, 1),
-            "percent_of_flour": _SOURDOUGH_STARTER_PCT,
+            "percent_of_flour": starter_pct,
             "note": "Simplified formula: starter mass is listed separately rather than "
                     "deducted from the flour/water totals above.",
         }, []
@@ -261,6 +272,9 @@ def compute_recipe(
     oil_pct: float | None = None,
     yeast_pct: float | None = None,
     ball_weight_g: float | None = None,
+    poolish_percentage: float | None = None,
+    biga_percentage: float | None = None,
+    sourdough_percentage: float | None = None,
 ) -> dict[str, Any]:
     """Computes the dough formula for a SINGLE dough ball of `ball_weight_g` grams -
     this is the reusable "recipe", independent of how many balls you actually want to
@@ -269,6 +283,11 @@ def compute_recipe(
     style_defaults lets callers pass an already-resolved style (e.g. fetched from the
     Cosmos-backed StyleStore in styles.py) instead of looking it up in the in-memory
     STYLE_LIBRARY seed data below.
+
+    poolish_percentage/biga_percentage/sourdough_percentage are each the preferment's
+    baker's percentage (grams of preferment flour per 100g of total flour) - only the
+    one matching `technique` has any effect, and each falls back to a sane default
+    (40% for poolish/biga, 20% for sourdough) when left unset.
     """
     if technique not in TECHNIQUES:
         raise ValueError(f"unknown technique '{technique}', expected one of {TECHNIQUES}")
@@ -293,7 +312,12 @@ def compute_recipe(
     salt_g = flour_total_g * salt / 100
     oil_g = flour_total_g * oil / 100 if oil else 0.0
 
-    leavening, leavening_warnings = _leavening(technique, flour_total_g, water_total_g, yeast_pct)
+    leavening, leavening_warnings = _leavening(
+        technique, flour_total_g, water_total_g, yeast_pct,
+        poolish_pct_override=poolish_percentage,
+        biga_pct_override=biga_percentage,
+        sourdough_pct_override=sourdough_percentage,
+    )
     warnings += leavening_warnings
 
     flours_out = [

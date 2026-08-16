@@ -73,6 +73,9 @@ def compute_recipe(request: RecipeGenerateRequest) -> dict:
             oil_pct=request.oil_pct,
             yeast_pct=request.yeast_pct,
             ball_weight_g=request.ball_weight_g,
+            poolish_percentage=request.poolish_percentage,
+            biga_percentage=request.biga_percentage,
+            sourdough_percentage=request.sourdough_percentage,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
