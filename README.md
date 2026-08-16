@@ -103,7 +103,13 @@ is empty - same pattern as the style library below. Non-Cosmos backends (`sqlite
 `postgres`, and the test suite) serve the seed data directly from memory. **A container
 seeded before the ash fields existed won't pick them up on its own** (seeding only runs
 against an empty container) - run `python scripts/backfill_flour_ash.py` against it once
-to patch `ash_min_pct`/`ash_max_pct` into the existing documents in place.
+to patch `ash_min_pct`/`ash_max_pct` into the existing documents in place, or delete the
+container and let the app recreate/reseed it from scratch (see below).
+
+The `pizza_recipes`/`pizza_styles`/`pizza_flours` containers (and their non-Cosmos
+equivalents) are built eagerly in `app/main.py`'s startup hook, not lazily on first
+request - so a deploy alone is what creates/reseeds them (e.g. if a container was
+deleted out-of-band), without needing a request to hit a specific endpoint first.
 
 ### Built-in styles (pizza-chef / cookbook references)
 
