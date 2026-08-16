@@ -38,8 +38,8 @@ separate, query-time concern (`?num_balls=N` on `/recipes/generate` and
 {
   "name": "Friday pizza night",
   "flours": [
-    {"type": "soft_wheat_00", "percent": 80},
-    {"type": "whole_wheat", "percent": 20}
+    {"description": "soft_wheat_00", "ash%": 0.55, "percent": 80},
+    {"description": "whole_wheat", "percent": 20}
   ],
   "technique": "cold_ferment_48h",
   "style": "ny_style",
@@ -51,9 +51,12 @@ separate, query-time concern (`?num_balls=N` on `/recipes/generate` and
 ```
 
 - `flours` - baker's percentages of the blend relative to each other; they don't need to
-  sum to exactly 100, they're normalized (with a warning) if not. Every `type` must
+  sum to exactly 100, they're normalized (with a warning) if not. Every `description` must
   match an entry in the flour catalogue (see below) - its `id` or one of its localized
-  names/codes; anything else is rejected with a 400.
+  names/codes; anything else is rejected with a 400. `ash%` is optional and only
+  meaningful for milled wheat flours (e.g. `0.55` for Italian Tipo 00, per DPR 187/2001) -
+  when set, it's cross-checked against the resolved flour's ash range and a mismatch is
+  returned as a (non-fatal) warning rather than rejected.
 - `technique` - one of `direct`, `same_day`, `poolish`, `biga`, `sourdough`,
   `cold_ferment_24h`, `cold_ferment_48h`, `cold_ferment_72h`. Drives the yeast/preferment
   math and the generated fermentation schedule.
@@ -72,21 +75,35 @@ step-by-step fermentation schedule, and the style's attribution.
 
 ### International flour catalogue
 
-Every `flours[].type` cited in a request must match an entry from `GET /recipes/flours`
-- matched case-insensitively against that entry's `id` or any of its localized
-names/codes, so you can use whatever your country calls it: `"00"`, `"Farina 00"`,
-`"Weizenmehl 405"`, and `"T45"` all resolve to the same `soft_wheat_00` flour. The
-catalogue covers wheat (soft wheat types 00/0/1/2, whole wheat, Manitoba, durum,
-Italian ancient-grain landraces), rye, oats, gluten-free cereals (rice, corn, millet,
-sorghum, teff, ...), legumes, nuts/seeds, tubers/starches, and a few specialty flours -
-~60 entries in total, each with `id`, `category`, `gluten`, `bread`/`pizza` suitability,
-`max_blend_pct`, and localized `names` (en/it/fr/de).
+Every `flours[].description` cited in a request must match an entry from
+`GET /recipes/flours` - matched case-insensitively against that entry's `id` or any of
+its localized names/codes, so you can use whatever your country calls it: `"00"`,
+`"Farina 00"`, `"Weizenmehl 405"`, and `"T45"` all resolve to the same `soft_wheat_00`
+flour. The catalogue covers wheat (soft wheat types 00/0/1/2, whole wheat, Manitoba,
+durum, Italian ancient-grain landraces), rye, oats, gluten-free cereals (rice, corn,
+millet, sorghum, teff, ...), legumes, nuts/seeds, tubers/starches, and a few specialty
+flours - ~60 entries in total, each with `id`, `category`, `gluten`, `bread`/`pizza`
+suitability, `max_blend_pct`, and localized `names` (en/it/fr/de).
+
+Entries for milled wheat refinement grades (the soft-wheat 00/0/1/2/whole-wheat ladder,
+rye, spelt) also carry `ash_min_pct`/`ash_max_pct` - the ash content (% per 100g of
+flour) that grade corresponds to, per the Italian DPR 187/2001, German DIN 10355, and
+French Calvel classifications. Italian Tipo 00 is ash ≤0.55%, Tipo 0 ≤0.65%, Tipo 1
+≤0.80%, Tipo 2 ≤0.95% (semi-integrale), and integrale 1.30-1.70% (that last one is the
+narrower legal band; the catalogue's `whole_wheat` range, 1.20-1.80%, is the broader
+cross-country correspondence band `WHEAT_CLASSIFICATIONS` in `app/flours.py` derives
+from). Other flours (durum, ancient wheats, rice, legumes, starches, ...) have no ash
+field. A request's `flours[].ash%` is cross-checked against this range when both are
+present.
 
 This catalogue is seed data (`app/flours.py`'s `FLOUR_CATALOG`). When `DB_BACKEND=cosmos`,
 it lives in its own Cosmos container (`COSMOS_FLOURS_CONTAINER`, default `pizza_flours`)
 instead of hardcoded in the source, seeded automatically the first time that container
 is empty - same pattern as the style library below. Non-Cosmos backends (`sqlite`/
-`postgres`, and the test suite) serve the seed data directly from memory.
+`postgres`, and the test suite) serve the seed data directly from memory. **A container
+seeded before the ash fields existed won't pick them up on its own** (seeding only runs
+against an empty container) - run `python scripts/backfill_flour_ash.py` against it once
+to patch `ash_min_pct`/`ash_max_pct` into the existing documents in place.
 
 ### Built-in styles (pizza-chef / cookbook references)
 

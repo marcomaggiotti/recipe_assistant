@@ -32,6 +32,35 @@ def test_unrecognized_flour_does_not_resolve():
     assert store.resolve("") is None
 
 
+def test_wheat_refinement_grades_carry_ash_content():
+    store = InMemoryFlourCatalogStore()
+    assert store.resolve("00")["ash_max_pct"] == 0.55
+    assert store.resolve("integrale")["ash_min_pct"] == 1.20
+    assert store.resolve("rye")["ash_max_pct"] == 2.00
+
+
+def test_flours_without_a_tracked_ash_grade_have_none():
+    store = InMemoryFlourCatalogStore()
+    assert store.resolve("rice_white").get("ash_min_pct") is None
+    assert store.resolve("durum_rimacinata").get("ash_min_pct") is None
+
+
+def test_ash_pct_disambiguates_when_description_alone_would_be_ambiguous():
+    store = InMemoryFlourCatalogStore()
+    ambiguous = [
+        {**flour, "names": {"en": "Ambiguous wheat"}}
+        for flour in FLOUR_CATALOG if flour["id"] in ("soft_wheat_00", "soft_wheat_0")
+    ]
+
+    class _FixtureStore(InMemoryFlourCatalogStore):
+        def list(self):
+            return ambiguous
+
+    fixture = _FixtureStore()
+    assert fixture.resolve("Ambiguous wheat", 0.30)["id"] == "soft_wheat_00"
+    assert fixture.resolve("Ambiguous wheat", 0.60)["id"] == "soft_wheat_0"
+
+
 def test_every_alias_maps_to_exactly_one_flour():
     # A bare code like "00" or "1" must not be ambiguous between two catalogue entries.
     store = InMemoryFlourCatalogStore()

@@ -45,16 +45,26 @@ def compute_recipe(request: RecipeGenerateRequest) -> dict:
         raise HTTPException(status_code=400, detail=f"unknown style '{request.style}'")
 
     catalog = get_flour_catalog_store()
-    unknown = [f.type for f in request.flours if catalog.resolve(f.type) is None]
+    resolved = [(f, catalog.resolve(f.description, f.ash_pct)) for f in request.flours]
+    unknown = [f.description for f, flour in resolved if flour is None]
     if unknown:
         raise HTTPException(
             status_code=400,
             detail=f"unknown flour type(s): {', '.join(unknown)} - see GET /recipes/flours for the allowed catalogue",
         )
 
+    ash_warnings = [
+        f"ash% {f.ash_pct} for '{f.description}' is outside {flour['id']}'s typical "
+        f"{flour['ash_min_pct']}-{flour['ash_max_pct']}% range"
+        for f, flour in resolved
+        if f.ash_pct is not None and flour.get("ash_min_pct") is not None and not (
+            flour["ash_min_pct"] <= f.ash_pct <= flour["ash_max_pct"]
+        )
+    ]
+
     try:
-        return _compute_recipe(
-            flours=[f.model_dump() for f in request.flours],
+        result = _compute_recipe(
+            flours=[f.model_dump(by_alias=True) for f in request.flours],
             technique=request.technique,
             style=request.style,
             style_defaults=style_defaults,
@@ -66,6 +76,8 @@ def compute_recipe(request: RecipeGenerateRequest) -> dict:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
+    result["warnings"] = ash_warnings + result["warnings"]
+    return result
 
 
 @router.get("/styles", response_model=list[StyleInfo])
@@ -92,8 +104,10 @@ def list_styles():
 
 @router.get("/flours")
 def list_flours():
-    """The international flour catalogue - every flours[].type in a recipe request
-    must match one of these entries' id or one of its localized names/codes."""
+    """The international flour catalogue - every flours[].description in a recipe
+    request must match one of these entries' id or one of its localized names/codes.
+    Entries covering milled wheat refinement grades (soft wheat, rye, spelt) also carry
+    ash_min_pct/ash_max_pct, the ash content (% per 100g) that grade corresponds to."""
     return {"items": get_flour_catalog_store().list()}
 
 
