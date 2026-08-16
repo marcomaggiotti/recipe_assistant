@@ -126,7 +126,7 @@ def normalize_flours(flours: list[dict[str, Any]]) -> tuple[list[dict[str, Any]]
     if abs(total - 100.0) > 0.5:
         warnings.append(f"flour percentages summed to {total:.1f}%, normalized to 100%")
         factor = 100.0 / total
-        flours = [{"type": f["type"], "percent": round(f["percent"] * factor, 2)} for f in flours]
+        flours = [{**f, "percent": round(f["percent"] * factor, 2)} for f in flours]
     return flours, warnings
 
 
@@ -297,7 +297,7 @@ def compute_recipe(
     warnings += leavening_warnings
 
     flours_out = [
-        {"type": f["type"], "percent": f["percent"], "grams": round(flour_total_g * f["percent"] / 100, 1)}
+        {**f, "grams": round(flour_total_g * f["percent"] / 100, 1)}
         for f in flours_norm
     ]
 

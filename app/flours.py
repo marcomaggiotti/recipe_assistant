@@ -1,15 +1,26 @@
 """International flour catalogue.
 
 Every flour cited when creating a recipe (POST /recipes, /recipes/generate, and the
-agent's generate/save tools) must resolve to one of the entries below - matched
-against the entry's id or any of its localized names/codes, case-insensitively - so a
-caller can use whatever name or type code their country uses ("00", "farina 00",
-"weizenmehl 405", "t45", "405", ... all resolve to the same flour).
+agent's generate/save tools) is identified by its `description` field, which must
+resolve to one of the entries below - matched against the entry's id or any of its
+localized names/codes, case-insensitively - so a caller can use whatever name or type
+code their country uses ("00", "farina 00", "weizenmehl 405", "t45", "405", ... all
+resolve to the same flour). Callers may additionally pass `ash%`, the flour's ash
+content, which is cross-checked against the resolved entry's ash_min_pct/ash_max_pct
+(when tracked) and used to disambiguate `description`s that match more than one entry.
+
+Ash content (`ash_min_pct`/`ash_max_pct`, in % per 100g of flour) is only tracked for
+flours covered by WHEAT_CLASSIFICATIONS below (the soft-wheat refinement grades,
+rye, spelt) - it's the milling-refinement indicator behind systems like Italy's
+00/0/1/2/integrale, Germany's 405-1600, and France's T45-T150. Flours outside that
+table (durum, ancient wheats, rice, legumes, starches, ...) have no ash field.
 
 FLOUR_CATALOG is seed data. When DB_BACKEND=cosmos, it's written into its own Cosmos
 container (COSMOS_FLOURS_CONTAINER, default "pizza_flours") on first use and served
 from there afterwards - mirrors styles.py's StyleStore. Non-Cosmos backends (local
-dev, tests) just serve the seed data directly.
+dev, tests) just serve the seed data directly. A container seeded before the ash
+fields were added won't pick them up automatically (seeding only runs when the
+container is empty) - see scripts/backfill_flour_ash.py to update it in place.
 """
 from __future__ import annotations
 
@@ -68,14 +79,19 @@ STRENGTH_NOTE = (
 
 FLOUR_CATALOG: list[dict[str, Any]] = [
     {"id": "soft_wheat_00", "category": "wheat", "gluten": True, "bread": True, "pizza": True, "max_blend_pct": 100,
+     "ash_min_pct": 0.00, "ash_max_pct": 0.55,
      "names": {"en": "Soft wheat flour type 00", "it": "Farina 00", "fr": "Farine T45", "de": "Weizenmehl 405"}},
     {"id": "soft_wheat_0", "category": "wheat", "gluten": True, "bread": True, "pizza": True, "max_blend_pct": 100,
+     "ash_min_pct": 0.50, "ash_max_pct": 0.65,
      "names": {"en": "Soft wheat flour type 0", "it": "Farina 0", "fr": "Farine T55", "de": "Weizenmehl 550"}},
     {"id": "soft_wheat_1", "category": "wheat", "gluten": True, "bread": True, "pizza": True, "max_blend_pct": 100,
+     "ash_min_pct": 0.62, "ash_max_pct": 0.80,
      "names": {"en": "Soft wheat flour type 1", "it": "Farina tipo 1", "fr": "Farine T65", "de": "Weizenmehl 812"}},
     {"id": "soft_wheat_2", "category": "wheat", "gluten": True, "bread": True, "pizza": True, "max_blend_pct": 100,
+     "ash_min_pct": 0.75, "ash_max_pct": 0.95,
      "names": {"en": "Soft wheat flour type 2", "it": "Farina tipo 2", "fr": "Farine T80/T110", "de": "Weizenmehl 1050"}},
     {"id": "whole_wheat", "category": "wheat", "gluten": True, "bread": True, "pizza": True, "max_blend_pct": 100,
+     "ash_min_pct": 1.20, "ash_max_pct": 1.80,
      "names": {"en": "Whole wheat flour", "it": "Farina integrale", "fr": "Farine T150", "de": "Weizenvollkornmehl"}},
     {"id": "manitoba", "category": "wheat", "gluten": True, "bread": True, "pizza": True, "max_blend_pct": 100,
      "notes": "High strength (W>350), any refinement type",
@@ -86,6 +102,7 @@ FLOUR_CATALOG: list[dict[str, Any]] = [
      "notes": "Pane di Altamura, Sicilian bread",
      "names": {"en": "Re-milled durum semolina", "it": "Semola rimacinata", "fr": "Semoule fine de blé dur", "de": "Hartweizenmehl"}},
     {"id": "spelt", "category": "ancient_wheat", "gluten": True, "bread": True, "pizza": True, "max_blend_pct": 100,
+     "ash_min_pct": 0.00, "ash_max_pct": 1.20,
      "names": {"en": "Spelt flour", "it": "Farina di farro spelta", "fr": "Farine d'épeautre", "de": "Dinkelmehl"}},
     {"id": "einkorn", "category": "ancient_wheat", "gluten": True, "bread": True, "pizza": True, "max_blend_pct": 100,
      "notes": "Weak gluten",
@@ -114,6 +131,7 @@ FLOUR_CATALOG: list[dict[str, Any]] = [
      "names": {"en": "Solina wheat flour", "it": "Farina di Solina"}},
     {"id": "rye", "category": "cereal_gluten", "gluten": True, "bread": True, "pizza": False, "max_blend_pct": 100,
      "notes": "German types 815-1740, French T70-T170",
+     "ash_min_pct": 0.60, "ash_max_pct": 2.00,
      "names": {"en": "Rye flour", "it": "Farina di segale", "fr": "Farine de seigle", "de": "Roggenmehl"}},
     {"id": "barley", "category": "cereal_gluten", "gluten": True, "bread": True, "pizza": False, "max_blend_pct": 30,
      "names": {"en": "Barley flour", "it": "Farina d'orzo", "fr": "Farine d'orge", "de": "Gerstenmehl"}},
@@ -236,16 +254,25 @@ def _match_keys(flour: dict[str, Any]) -> set[str]:
     return keys
 
 
+def _ash_in_range(flour: dict[str, Any], ash_pct: float) -> bool:
+    ash_min, ash_max = flour.get("ash_min_pct"), flour.get("ash_max_pct")
+    return ash_min is not None and ash_max is not None and ash_min <= ash_pct <= ash_max
+
+
 class FlourCatalogStore(ABC):
     @abstractmethod
     def list(self) -> list[dict[str, Any]]: ...
 
-    def resolve(self, type_str: str) -> dict[str, Any] | None:
-        needle = type_str.strip().lower()
-        for flour in self.list():
-            if needle in _match_keys(flour):
-                return flour
-        return None
+    def resolve(self, description: str, ash_pct: float | None = None) -> dict[str, Any] | None:
+        needle = description.strip().lower()
+        matches = [flour for flour in self.list() if needle in _match_keys(flour)]
+        if not matches:
+            return None
+        if ash_pct is not None and len(matches) > 1:
+            for flour in matches:
+                if _ash_in_range(flour, ash_pct):
+                    return flour
+        return matches[0]
 
 
 class InMemoryFlourCatalogStore(FlourCatalogStore):

@@ -19,14 +19,16 @@ TOOLS = [
             "Compute a pizza dough recipe from a flour blend (baker's percentages that "
             "don't need to sum to exactly 100 - they get normalized), a fermentation "
             "technique, and an optional named style anchored to a real pizza-chef/cookbook "
-            "reference. Every flours[].type must match an entry in the flour catalogue "
+            "reference. Every flours[].description must match an entry in the flour catalogue "
             "(list_pizza_flours) - its id or one of its localized names/codes (e.g. '00', "
             "'Farina 00', 'Weizenmehl 405', 'T45' all resolve to the same flour); unrecognized "
-            "flour names are rejected. Any of hydration/salt/oil/yeast % or ball weight left "
-            "unset falls back to the chosen style's defaults ('custom' style = generic "
-            "defaults with no attribution). The formula is always for a single dough ball; "
-            "pass num_balls to scale ingredient quantities up to a batch of that many balls "
-            "(defaults to 1)."
+            "flour names are rejected. flours[]['ash%'] is optional and only meaningful for "
+            "milled wheat flours (e.g. 0.55 for Italian Tipo 00) - it's cross-checked against "
+            "the resolved flour's ash range and helps disambiguate. Any of hydration/salt/oil/"
+            "yeast % or ball weight left unset falls back to the chosen style's defaults "
+            "('custom' style = generic defaults with no attribution). The formula is always for "
+            "a single dough ball; pass num_balls to scale ingredient quantities up to a batch of "
+            "that many balls (defaults to 1)."
         ),
         "input_schema": {
             "type": "object",
@@ -35,8 +37,12 @@ TOOLS = [
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "properties": {"type": {"type": "string"}, "percent": {"type": "number"}},
-                        "required": ["type", "percent"],
+                        "properties": {
+                            "description": {"type": "string"},
+                            "ash%": {"type": "number", "description": "Ash content %, e.g. 0.55 for Italian Tipo 00"},
+                            "percent": {"type": "number"},
+                        },
+                        "required": ["description", "percent"],
                     },
                 },
                 "technique": {"type": "string", "enum": TECHNIQUES},
@@ -66,8 +72,12 @@ TOOLS = [
                     "type": "array",
                     "items": {
                         "type": "object",
-                        "properties": {"type": {"type": "string"}, "percent": {"type": "number"}},
-                        "required": ["type", "percent"],
+                        "properties": {
+                            "description": {"type": "string"},
+                            "ash%": {"type": "number", "description": "Ash content %, e.g. 0.55 for Italian Tipo 00"},
+                            "percent": {"type": "number"},
+                        },
+                        "required": ["description", "percent"],
                     },
                 },
                 "technique": {"type": "string", "enum": TECHNIQUES},
@@ -89,9 +99,10 @@ TOOLS = [
     {
         "name": "list_pizza_flours",
         "description": (
-            "List the international flour catalogue. Every flours[].type on "
+            "List the international flour catalogue. Every flours[].description on "
             "generate_pizza_recipe/save_pizza_recipe must match one of these entries' id "
-            "or one of its localized names/codes (names differ by country)."
+            "or one of its localized names/codes (names differ by country). Entries for milled "
+            "wheat refinement grades also carry ash_min_pct/ash_max_pct."
         ),
         "input_schema": {"type": "object", "properties": {}},
     },
@@ -138,7 +149,10 @@ def _generate(style_store: StyleStore, flour_store: FlourCatalogStore, tool_inpu
     if style_defaults is None:
         raise ValueError(f"unknown style '{style}'")
 
-    unknown = [f["type"] for f in tool_input["flours"] if flour_store.resolve(f["type"]) is None]
+    unknown = [
+        f["description"] for f in tool_input["flours"]
+        if flour_store.resolve(f["description"], f.get("ash%")) is None
+    ]
     if unknown:
         raise ValueError(f"unknown flour type(s): {', '.join(unknown)} - see list_pizza_flours for the allowed catalogue")
 

@@ -8,7 +8,7 @@ from app.schemas import GeneratedRecipe, StyleAttribution, StyleInfo
 client = TestClient(app)
 
 # Valid catalogue flour types (see app/flours.py) used across API-level tests, which
-# validate flours[].type against the flour catalogue.
+# validate flours[].description against the flour catalogue.
 SOFT_WHEAT_00 = "soft_wheat_00"
 WHOLE_WHEAT = "whole_wheat"
 
@@ -133,7 +133,7 @@ def test_api_generate_endpoint():
         "/recipes/generate",
         params={"num_balls": 3},
         json={
-            "flours": [{"type": SOFT_WHEAT_00, "percent": 90}, {"type": WHOLE_WHEAT, "percent": 10}],
+            "flours": [{"description": SOFT_WHEAT_00, "percent": 90}, {"description": WHOLE_WHEAT, "percent": 10}],
             "technique": "cold_ferment_48h",
             "style": "ny_style",
         },
@@ -148,7 +148,7 @@ def test_api_generate_endpoint():
 def test_api_generate_defaults_to_one_ball():
     response = client.post(
         "/recipes/generate",
-        json={"flours": [{"type": SOFT_WHEAT_00, "percent": 100}], "technique": "direct"},
+        json={"flours": [{"description": SOFT_WHEAT_00, "percent": 100}], "technique": "direct"},
     )
     assert response.status_code == 200
     body = response.json()
@@ -161,7 +161,7 @@ def test_api_save_list_get_delete_roundtrip():
         "/recipes",
         json={
             "name": "Friday night pizza",
-            "flours": [{"type": SOFT_WHEAT_00, "percent": 100}],
+            "flours": [{"description": SOFT_WHEAT_00, "percent": 100}],
             "technique": "direct",
         },
     )
@@ -217,7 +217,7 @@ def test_style_info_shares_field_names_with_generated_recipe():
 def test_api_rejects_bad_technique():
     response = client.post(
         "/recipes/generate",
-        json={"flours": [{"type": SOFT_WHEAT_00, "percent": 100}], "technique": "invalid"},
+        json={"flours": [{"description": SOFT_WHEAT_00, "percent": 100}], "technique": "invalid"},
     )
     assert response.status_code == 422
 
@@ -226,7 +226,7 @@ def test_api_rejects_unknown_style():
     response = client.post(
         "/recipes/generate",
         json={
-            "flours": [{"type": SOFT_WHEAT_00, "percent": 100}],
+            "flours": [{"description": SOFT_WHEAT_00, "percent": 100}],
             "technique": "direct",
             "style": "does_not_exist",
         },
@@ -237,7 +237,7 @@ def test_api_rejects_unknown_style():
 def test_api_rejects_unknown_flour():
     response = client.post(
         "/recipes/generate",
-        json={"flours": [{"type": "moon dust", "percent": 100}], "technique": "direct"},
+        json={"flours": [{"description": "moon dust", "percent": 100}], "technique": "direct"},
     )
     assert response.status_code == 400
     assert "unknown flour type" in response.json()["detail"]
@@ -250,3 +250,29 @@ def test_api_flours_endpoint_lists_catalog():
     assert SOFT_WHEAT_00 in ids
     assert "rice_white" in ids
     assert "durum_rimacinata" in ids
+
+
+def test_api_flours_endpoint_exposes_ash_content():
+    response = client.get("/recipes/flours")
+    items = {f["id"]: f for f in response.json()["items"]}
+    assert items[SOFT_WHEAT_00]["ash_min_pct"] == 0.00
+    assert items[SOFT_WHEAT_00]["ash_max_pct"] == 0.55
+    assert items["rice_white"].get("ash_min_pct") is None
+
+
+def test_api_generate_accepts_matching_ash_pct_without_warning():
+    response = client.post(
+        "/recipes/generate",
+        json={"flours": [{"description": SOFT_WHEAT_00, "ash%": 0.50, "percent": 100}], "technique": "direct"},
+    )
+    assert response.status_code == 200
+    assert not any("ash%" in w for w in response.json()["warnings"])
+
+
+def test_api_generate_warns_on_mismatched_ash_pct():
+    response = client.post(
+        "/recipes/generate",
+        json={"flours": [{"description": SOFT_WHEAT_00, "ash%": 1.50, "percent": 100}], "technique": "direct"},
+    )
+    assert response.status_code == 200
+    assert any("ash%" in w for w in response.json()["warnings"])
