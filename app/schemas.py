@@ -26,10 +26,10 @@ class RecipeGenerateRequest(BaseModel):
     flours: list[FlourComponent] = Field(min_length=1)
     technique: Technique
     style: str = "custom"
-    hydration_pct: float | None = Field(default=None, ge=40, le=100)
-    salt_pct: float | None = Field(default=None, ge=0, le=6)
-    oil_pct: float | None = Field(default=None, ge=0, le=15)
-    yeast_pct: float | None = Field(default=None, ge=0, le=5)
+    hydration_pct: float | None = Field(default=None, ge=0, le=100)
+    salt_pct: float | None = Field(default=None, ge=0)
+    oil_pct: float | None = Field(default=None, ge=0)
+    yeast_pct: float | None = Field(default=None, ge=0)
     ball_weight_g: float | None = Field(default=None, gt=0)
 
 
