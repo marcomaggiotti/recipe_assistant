@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
-from .routers import agent, health, pizza
+from .routers import agent, flour_explorer, health, pizza
 from .routers.pizza import get_flour_catalog_store, get_repo, get_style_store
 
 settings = get_settings()
@@ -41,3 +41,4 @@ app.add_middleware(
 app.include_router(health.router)
 app.include_router(pizza.router)
 app.include_router(agent.router)
+app.include_router(flour_explorer.router)

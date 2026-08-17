@@ -23,9 +23,21 @@ as a standalone, self-contained service (own dependencies, Dockerfile, config).
 | GET    | `/recipes/{id}`   | Get one saved recipe (`?num_balls=N`, default 1)               |
 | DELETE | `/recipes/{id}`   | Delete a saved recipe                                          |
 | POST   | `/agent/chat`     | Natural-language agent chat over recipe generation/storage    |
+| GET    | `/flour-explorer` | Browser page - filterable thumbnail grid over the flour catalogue |
 
-All endpoints except `/health` require header `X-API-Key` if `API_KEY` is set in the
-environment; leave it empty for local dev.
+All endpoints except `/health` and `/flour-explorer` require header `X-API-Key` if
+`API_KEY` is set in the environment; leave it empty for local dev.
+
+### Flour Explorer page
+
+`GET /flour-explorer` serves a small, dependency-free HTML/JS page (no frontend build
+step) that queries [flour-service](https://github.com/marcomaggiotti/flour_service)
+directly from the browser - filter by category, gluten, bread/pizza suitability,
+strength tier, or ash%, or look up one flour by name/national type code - and renders
+the results as a thumbnail card grid. It's a live view (no local copy of the
+catalogue): set `FLOUR_SERVICE_URL` to point it at a different deployment (default
+`https://flour-service.onrender.com`), e.g. `http://localhost:8001` if you're running
+flour-service locally too.
 
 ## The recipe model
 

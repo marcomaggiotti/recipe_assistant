@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flour Explorer</title>
+<style>
+  :root {
+    --bg: #faf7f2;
+    --surface: #ffffff;
+    --border: #e6ddd0;
+    --text: #2b241c;
+    --text-muted: #7a7062;
+    --accent: #b5652f;
+    --accent-soft: #f3e2d0;
+    --ok: #3f7d4c;
+    --no: #b5462f;
+    --shadow: 0 1px 2px rgba(43,36,28,0.06), 0 4px 16px rgba(43,36,28,0.06);
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1712;
+      --surface: #262019;
+      --border: #3a3226;
+      --text: #f1ece2;
+      --text-muted: #a89c89;
+      --accent: #e0975c;
+      --accent-soft: #3a2b1c;
+      --ok: #6fbf7c;
+      --no: #d97a63;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 16px rgba(0,0,0,0.35);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.45;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 20px 64px; }
+  header.page-head { margin-bottom: 22px; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .subtitle { color: var(--text-muted); font-size: 0.95rem; margin: 0; }
+  .source-note { color: var(--text-muted); font-size: 0.8rem; margin-top: 6px; }
+  .source-note a { color: inherit; }
+
+  form.filters {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 18px 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 14px 16px;
+    margin-bottom: 18px;
+  }
+  form.filters .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  form.filters .field.wide { grid-column: span 2; }
+  label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+  input, select {
+    font: inherit;
+    padding: 8px 10px;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+  }
+  input:focus, select:focus, button:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .filters-actions { display: flex; align-items: flex-end; gap: 8px; grid-column: 1 / -1; }
+  button {
+    font: inherit;
+    cursor: pointer;
+    border-radius: 9px;
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button:hover { filter: brightness(0.97); }
+  details.advanced { grid-column: 1 / -1; }
+  details.advanced summary { cursor: pointer; font-size: 0.8rem; color: var(--text-muted); }
+  details.advanced .field { margin-top: 10px; max-width: 320px; }
+
+  #status {
+    font-size: 0.88rem;
+    color: var(--text-muted);
+    min-height: 1.2em;
+    margin-bottom: 14px;
+  }
+  #status.error { color: var(--no); }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 14px;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    text-align: left;
+    cursor: pointer;
+    padding: 0;
+  }
+  .thumb {
+    height: 84px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.1rem;
+  }
+  .card-body { padding: 12px 14px 14px; }
+  .card-name { font-weight: 600; font-size: 0.98rem; margin: 0 0 2px; }
+  .card-sub { font-size: 0.78rem; color: var(--text-muted); margin: 0 0 8px; }
+  .badges { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+  .badge {
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    white-space: nowrap;
+  }
+  .badge.ok { color: var(--ok); }
+  .badge.no { color: var(--no); background: transparent; border: 1px solid var(--border); }
+  .meta-line { font-size: 0.76rem; color: var(--text-muted); }
+  .details { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); font-size: 0.78rem; }
+  .details.open { display: block; }
+  .details dt { color: var(--text-muted); margin-top: 6px; }
+  .details dd { margin: 0; }
+
+  .empty, .loading { padding: 40px 0; text-align: center; color: var(--text-muted); }
+  footer.hint { margin-top: 30px; font-size: 0.78rem; color: var(--text-muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page-head">
+    <h1>Flour Explorer</h1>
+    <p class="subtitle">Browse the international flour catalogue - filter by category, gluten, suitability, ash%, dough strength, or look up a specific name/type code.</p>
+    <p class="source-note">Live data from <a href="__FLOUR_SERVICE_URL__/docs" target="_blank" rel="noopener">flour-service</a> - no local copy, this page always reflects the current catalogue.</p>
+  </header>
+
+  <form class="filters" id="filters">
+    <div class="field wide">
+      <label for="f-name">Name or type code</label>
+      <input id="f-name" type="text" placeholder="e.g. Farina 00, T45, Manitoba, 405">
+    </div>
+    <div class="field">
+      <label for="f-category">Category</label>
+      <select id="f-category">
+        <option value="">Any</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="f-gluten">Gluten</label>
+      <select id="f-gluten"><option value="">Any</option><option value="true">Contains gluten</option><option value="false">Gluten-free</option></select>
+    </div>
+    <div class="field">
+      <label for="f-pizza">Pizza suitable</label>
+      <select id="f-pizza"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select>
+    </div>
+    <div class="field">
+      <label for="f-bread">Bread suitable</label>
+      <select id="f-bread"><option value="">Any</option><option value="true">Yes</option><option value="false">No</option></select>
+    </div>
+    <div class="field">
+      <label for="f-strength">Strength tier</label>
+      <select id="f-strength">
+        <option value="">Any</option>
+        <option value="weak">Weak</option>
+        <option value="medium">Medium</option>
+        <option value="strong">Strong</option>
+        <option value="very_strong">Very strong</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="f-ash">Ash % (per 100g)</label>
+      <input id="f-ash" type="number" min="0" max="3" step="0.01" placeholder="e.g. 0.55">
+    </div>
+
+    <details class="advanced">
+      <summary>Advanced</summary>
+      <div class="field">
+        <label for="f-apikey">API key (only if flour-service requires one)</label>
+        <input id="f-apikey" type="password" autocomplete="off" placeholder="X-API-Key">
+      </div>
+    </details>
+
+    <div class="filters-actions">
+      <button type="submit" class="primary">Search</button>
+      <button type="button" id="clear-btn">Clear filters</button>
+    </div>
+  </form>
+
+  <div id="status" role="status" aria-live="polite"></div>
+  <div id="grid" class="grid"></div>
+</div>
+
+<script>
+(function () {
+  const API_BASE = "__FLOUR_SERVICE_URL__";
+
+  const CATEGORY_LABELS = {
+    wheat: "Wheat", durum_wheat: "Durum wheat", ancient_wheat: "Ancient wheat",
+    cereal_gluten: "Other gluten cereal", cereal_gf: "Gluten-free cereal",
+    pseudocereal: "Pseudocereal", legume: "Legume", nut_seed: "Nut / seed",
+    tuber_root: "Tuber / root", starch: "Starch", other: "Other",
+  };
+  const CATEGORY_ICON = {
+    wheat: ["🌾", "#d9a441"], durum_wheat: ["🌾", "#e0872c"],
+    ancient_wheat: ["🏺", "#a97c50"], cereal_gluten: ["🌱", "#7c8c4a"],
+    cereal_gf: ["🍚", "#e7d27a"], pseudocereal: ["🌻", "#c99a3e"],
+    legume: ["🫘", "#8a9b5e"], nut_seed: ["🌰", "#a8703f"],
+    tuber_root: ["🥔", "#c17a3d"], starch: ["✨", "#b9b3a6"],
+    other: ["🧺", "#9a8f7d"],
+  };
+
+  const els = {
+    form: document.getElementById("filters"),
+    name: document.getElementById("f-name"),
+    category: document.getElementById("f-category"),
+    gluten: document.getElementById("f-gluten"),
+    pizza: document.getElementById("f-pizza"),
+    bread: document.getElementById("f-bread"),
+    strength: document.getElementById("f-strength"),
+    ash: document.getElementById("f-ash"),
+    apikey: document.getElementById("f-apikey"),
+    clearBtn: document.getElementById("clear-btn"),
+    status: document.getElementById("status"),
+    grid: document.getElementById("grid"),
+  };
+
+  function authHeaders() {
+    const key = els.apikey.value.trim();
+    return key ? { "X-API-Key": key } : {};
+  }
+
+  async function apiFetch(path) {
+    const res = await fetch(API_BASE + path, { headers: authHeaders() });
+    if (res.status === 404) return null;
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || (res.status + " " + res.statusText));
+    }
+    return res.json();
+  }
+
+  function setStatus(text, isError) {
+    els.status.textContent = text || "";
+    els.status.classList.toggle("error", !!isError);
+  }
+
+  function ashInRange(flour, ashPct) {
+    const min = flour.ash_min_pct, max = flour.ash_max_pct;
+    return min != null && max != null && ashPct >= min && ashPct <= max;
+  }
+
+  async function populateCategories() {
+    try {
+      const data = await apiFetch("/flours");
+      const cats = Array.from(new Set(data.items.map((f) => f.category))).sort();
+      for (const cat of cats) {
+        const opt = document.createElement("option");
+        opt.value = cat;
+        opt.textContent = CATEGORY_LABELS[cat] || cat;
+        els.category.appendChild(opt);
+      }
+    } catch (e) {
+      // category list is a nicety - filtering still works with an empty dropdown
+    }
+  }
+
+  function boolParam(value) {
+    return value === "" ? null : value === "true";
+  }
+
+  async function runSearch() {
+    const name = els.name.value.trim();
+    const ashRaw = els.ash.value.trim();
+    const ashPct = ashRaw === "" ? null : parseFloat(ashRaw);
+    const strength = els.strength.value;
+
+    setStatus("Loading… (the service can take up to a minute to wake up if it hasn't been used recently)");
+    els.grid.innerHTML = "";
+
+    try {
+      let items;
+      if (name) {
+        const flour = await apiFetch("/flours/by-name?name=" + encodeURIComponent(name) + (ashRaw !== "" ? "&ash%25=" + ashRaw : ""));
+        items = flour ? [flour] : [];
+        setStatus(items.length ? "Exact match for “" + name + "” - clear this field to browse the full catalogue." : "No flour matches “" + name + "”.");
+        render(items);
+        return;
+      }
+
+      const params = new URLSearchParams();
+      if (els.category.value) params.set("category", els.category.value);
+      const gluten = boolParam(els.gluten.value);
+      if (gluten !== null) params.set("gluten", gluten);
+      const pizza = boolParam(els.pizza.value);
+      if (pizza !== null) params.set("pizza", pizza);
+      const bread = boolParam(els.bread.value);
+      if (bread !== null) params.set("bread", bread);
+
+      const data = await apiFetch("/flours?" + params.toString());
+      items = data.items;
+
+      if (ashPct !== null && !Number.isNaN(ashPct)) {
+        items = items.filter((f) => ashInRange(f, ashPct));
+      }
+      if (strength) {
+        items = items.filter((f) => f.strength_tier === strength);
+      }
+
+      setStatus("Showing " + items.length + " flour" + (items.length === 1 ? "" : "s") + ".");
+      render(items);
+    } catch (e) {
+      setStatus("Couldn't reach flour-service: " + e.message, true);
+    }
+  }
+
+  function badge(text, cls) {
+    return '<span class="badge' + (cls ? " " + cls : "") + '">' + text + "</span>";
+  }
+
+  function card(flour) {
+    const [emoji, color] = CATEGORY_ICON[flour.category] || CATEGORY_ICON.other;
+    const names = flour.names || {};
+    const localized = ["it", "fr", "de"].map((l) => names[l]).filter(Boolean).join(" · ");
+    const badges = [];
+    badges.push(badge(flour.gluten ? "Gluten" : "Gluten-free", flour.gluten ? "" : "ok"));
+    if (flour.pizza) badges.push(badge("Pizza", "ok"));
+    if (flour.bread) badges.push(badge("Bread", "ok"));
+    if (flour.strength_tier) badges.push(badge(flour.strength_tier.replace("_", " ")));
+
+    const ashLine = flour.ash_min_pct != null
+      ? "Ash " + flour.ash_min_pct.toFixed(2) + "–" + flour.ash_max_pct.toFixed(2) + "%"
+      : "";
+
+    const el = document.createElement("article");
+    el.className = "card";
+    el.innerHTML =
+      '<div class="thumb" style="background:' + color + '22">' + emoji + "</div>" +
+      '<div class="card-body">' +
+      '<p class="card-name">' + (names.en || flour.id) + "</p>" +
+      '<p class="card-sub">' + (CATEGORY_LABELS[flour.category] || flour.category) + "</p>" +
+      '<div class="badges">' + badges.join("") + "</div>" +
+      '<div class="meta-line">' + [ashLine].filter(Boolean).join(" · ") + "</div>" +
+      '<div class="details">' +
+      "<dl>" +
+      '<dt>Id / pizza_flours_id</dt><dd>' + flour.id + "</dd>" +
+      (localized ? "<dt>Localized names</dt><dd>" + localized + "</dd>" : "") +
+      (flour.description ? "<dt>Description</dt><dd>" + flour.description + "</dd>" : "") +
+      (flour.w_min != null ? "<dt>Strength (W)</dt><dd>" + flour.w_min + "–" + flour.w_max + "</dd>" : "") +
+      "<dt>Max blend %</dt><dd>" + flour.max_blend_pct + "%</dd>" +
+      "</dl></div>" +
+      "</div>";
+    el.addEventListener("click", () => el.querySelector(".details").classList.toggle("open"));
+    return el;
+  }
+
+  function render(items) {
+    els.grid.innerHTML = "";
+    if (!items.length) {
+      els.grid.innerHTML = '<div class="empty">No flours match these filters.</div>';
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    for (const flour of items) frag.appendChild(card(flour));
+    els.grid.appendChild(frag);
+  }
+
+  els.form.addEventListener("submit", (e) => { e.preventDefault(); runSearch(); });
+  els.clearBtn.addEventListener("click", () => {
+    els.form.reset();
+    runSearch();
+  });
+
+  populateCategories().then(runSearch);
+})();
+</script>
+</body>
+</html>
