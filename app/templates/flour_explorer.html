@@ -4,147 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Flour Explorer</title>
-<style>
-  :root {
-    --bg: #faf7f2;
-    --surface: #ffffff;
-    --border: #e6ddd0;
-    --text: #2b241c;
-    --text-muted: #7a7062;
-    --accent: #b5652f;
-    --accent-soft: #f3e2d0;
-    --ok: #3f7d4c;
-    --no: #b5462f;
-    --shadow: 0 1px 2px rgba(43,36,28,0.06), 0 4px 16px rgba(43,36,28,0.06);
-    --radius: 14px;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #1b1712;
-      --surface: #262019;
-      --border: #3a3226;
-      --text: #f1ece2;
-      --text-muted: #a89c89;
-      --accent: #e0975c;
-      --accent-soft: #3a2b1c;
-      --ok: #6fbf7c;
-      --no: #d97a63;
-      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 16px rgba(0,0,0,0.35);
-    }
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    line-height: 1.45;
-  }
-  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 20px 64px; }
-  header.page-head { margin-bottom: 22px; }
-  h1 { font-size: 1.6rem; margin: 0 0 4px; letter-spacing: -0.01em; }
-  .subtitle { color: var(--text-muted); font-size: 0.95rem; margin: 0; }
-  .source-note { color: var(--text-muted); font-size: 0.8rem; margin-top: 6px; }
-  .source-note a { color: inherit; }
-
-  form.filters {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    padding: 18px 20px;
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-    gap: 14px 16px;
-    margin-bottom: 18px;
-  }
-  form.filters .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
-  form.filters .field.wide { grid-column: span 2; }
-  label { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
-  input, select {
-    font: inherit;
-    padding: 8px 10px;
-    border-radius: 9px;
-    border: 1px solid var(--border);
-    background: var(--bg);
-    color: var(--text);
-  }
-  input:focus, select:focus, button:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 1px;
-  }
-  .filters-actions { display: flex; align-items: flex-end; gap: 8px; grid-column: 1 / -1; }
-  button {
-    font: inherit;
-    cursor: pointer;
-    border-radius: 9px;
-    padding: 8px 14px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--text);
-  }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
-  button:hover { filter: brightness(0.97); }
-  details.advanced { grid-column: 1 / -1; }
-  details.advanced summary { cursor: pointer; font-size: 0.8rem; color: var(--text-muted); }
-  details.advanced .field { margin-top: 10px; max-width: 320px; }
-
-  #status {
-    font-size: 0.88rem;
-    color: var(--text-muted);
-    min-height: 1.2em;
-    margin-bottom: 14px;
-  }
-  #status.error { color: var(--no); }
-
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 14px;
-  }
-  .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow);
-    overflow: hidden;
-    text-align: left;
-    cursor: pointer;
-    padding: 0;
-  }
-  .thumb {
-    height: 84px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 2.1rem;
-  }
-  .card-body { padding: 12px 14px 14px; }
-  .card-name { font-weight: 600; font-size: 0.98rem; margin: 0 0 2px; }
-  .card-sub { font-size: 0.78rem; color: var(--text-muted); margin: 0 0 8px; }
-  .badges { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
-  .badge {
-    font-size: 0.7rem;
-    font-weight: 600;
-    padding: 2px 7px;
-    border-radius: 999px;
-    background: var(--accent-soft);
-    color: var(--accent);
-    white-space: nowrap;
-  }
-  .badge.ok { color: var(--ok); }
-  .badge.no { color: var(--no); background: transparent; border: 1px solid var(--border); }
-  .meta-line { font-size: 0.76rem; color: var(--text-muted); }
-  .details { display: none; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); font-size: 0.78rem; }
-  .details.open { display: block; }
-  .details dt { color: var(--text-muted); margin-top: 6px; }
-  .details dd { margin: 0; }
-
-  .empty, .loading { padding: 40px 0; text-align: center; color: var(--text-muted); }
-  footer.hint { margin-top: 30px; font-size: 0.78rem; color: var(--text-muted); }
-</style>
+<link rel="stylesheet" href="/static/theme.css">
 </head>
 <body>
+<nav class="topnav"><div class="inner">
+  <a class="brand" href="/">Pizza Service</a>
+  <a class="navlink active" href="/flour-explorer">Flour Explorer</a>
+  <a class="navlink" href="/flour-products/new">Add Flour Product</a>
+  <a class="navlink" href="/new-recipe">New Recipe</a>
+</div></nav>
 <div class="wrap">
   <header class="page-head">
     <h1>Flour Explorer</h1>
@@ -152,7 +20,7 @@
     <p class="source-note">Live data from <a href="__FLOUR_SERVICE_URL__/docs" target="_blank" rel="noopener">flour-service</a> - no local copy, this page always reflects the current catalogue.</p>
   </header>
 
-  <form class="filters" id="filters">
+  <form class="panel grid-fields" id="filters">
     <div class="field wide">
       <label for="f-name">Name or type code</label>
       <input id="f-name" type="text" placeholder="e.g. Farina 00, T45, Manitoba, 405">
@@ -198,7 +66,7 @@
       </div>
     </details>
 
-    <div class="filters-actions">
+    <div class="actions-row">
       <button type="submit" class="primary">Search</button>
       <button type="button" id="clear-btn">Clear filters</button>
     </div>
@@ -350,7 +218,7 @@
       : "";
 
     const el = document.createElement("article");
-    el.className = "card";
+    el.className = "card clickable";
     el.innerHTML =
       '<div class="thumb" style="background:' + color + '22">' + emoji + "</div>" +
       '<div class="card-body">' +

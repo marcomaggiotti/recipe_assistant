@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Add Flour Product</title>
+<link rel="stylesheet" href="/static/theme.css">
+</head>
+<body>
+<nav class="topnav"><div class="inner">
+  <a class="brand" href="/">Pizza Service</a>
+  <a class="navlink" href="/flour-explorer">Flour Explorer</a>
+  <a class="navlink active" href="/flour-products/new">Add Flour Product</a>
+  <a class="navlink" href="/new-recipe">New Recipe</a>
+</div></nav>
+<div class="wrap">
+  <header class="page-head">
+    <h1>Add Flour Product</h1>
+    <p class="subtitle">Link a real product page (e.g. a Migros/Coop listing) to a flour_catalog entry, so it can be looked up later by which catalogue flour it actually is.</p>
+    <p class="source-note">Saved to <a href="__FLOUR_SERVICE_URL__/docs" target="_blank" rel="noopener">flour-service</a>'s flour_products container.</p>
+  </header>
+
+  <div id="persistence-warning" class="status-line error" style="display:none;"></div>
+
+  <form class="panel grid-fields" id="add-form">
+    <div class="field wide">
+      <label for="f-url">Product URL</label>
+      <input id="f-url" type="url" required placeholder="https://www.migros.ch/it/product/104699700000">
+    </div>
+    <div class="field wide">
+      <label for="f-flour">Flour type (flour_catalog item)</label>
+      <select id="f-flour" required>
+        <option value="">Loading catalogue…</option>
+      </select>
+    </div>
+    <div class="field wide">
+      <label for="f-label">Label (optional)</label>
+      <input id="f-label" type="text" placeholder="e.g. Naturaplan Bio CH Weissmehl Coop">
+    </div>
+
+    <details class="advanced">
+      <summary>Advanced</summary>
+      <div class="field">
+        <label for="f-apikey">API key (only if flour-service requires one)</label>
+        <input id="f-apikey" type="password" autocomplete="off" placeholder="X-API-Key">
+      </div>
+    </details>
+
+    <div class="actions-row">
+      <button type="submit" class="primary">Add product</button>
+    </div>
+  </form>
+
+  <div id="status" role="status" aria-live="polite"></div>
+
+  <h2 style="font-size:1.05rem;">Linked products</h2>
+  <div id="list-status" class="status-line"></div>
+  <div id="grid" class="grid"></div>
+</div>
+
+<script>
+(function () {
+  const API_BASE = "__FLOUR_SERVICE_URL__";
+  let flourById = {};
+
+  const els = {
+    form: document.getElementById("add-form"),
+    url: document.getElementById("f-url"),
+    flour: document.getElementById("f-flour"),
+    label: document.getElementById("f-label"),
+    apikey: document.getElementById("f-apikey"),
+    status: document.getElementById("status"),
+    listStatus: document.getElementById("list-status"),
+    grid: document.getElementById("grid"),
+    persistenceWarning: document.getElementById("persistence-warning"),
+  };
+
+  function authHeaders(json) {
+    const key = els.apikey.value.trim();
+    const headers = key ? { "X-API-Key": key } : {};
+    if (json) headers["Content-Type"] = "application/json";
+    return headers;
+  }
+
+  async function apiFetch(path, options) {
+    const res = await fetch(API_BASE + path, { ...options, headers: { ...authHeaders(!!options?.body), ...(options?.headers || {}) } });
+    if (res.status === 404) return null;
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || (res.status + " " + res.statusText));
+    return body;
+  }
+
+  function setStatus(el, text, cls) {
+    el.textContent = text || "";
+    el.classList.remove("error", "ok");
+    if (cls) el.classList.add(cls);
+  }
+
+  async function checkPersistence() {
+    try {
+      const health = await apiFetch("/health");
+      if (health && health.db_backend === "memory") {
+        els.persistenceWarning.style.display = "block";
+        els.persistenceWarning.textContent =
+          "⚠ flour-service is running with an in-memory backend right now - products added here will be lost on its next restart. Ask the service owner to switch it to DB_BACKEND=cosmos for anything you want to keep.";
+      }
+    } catch (e) {
+      // health check is a nicety, ignore failures here
+    }
+  }
+
+  async function loadCatalogue() {
+    const data = await apiFetch("/flours");
+    flourById = {};
+    els.flour.innerHTML = "";
+    const sorted = [...data.items].sort((a, b) => (a.names?.en || a.id).localeCompare(b.names?.en || b.id));
+    for (const flour of sorted) {
+      flourById[flour.id] = flour;
+      const opt = document.createElement("option");
+      opt.value = flour.id;
+      opt.textContent = (flour.names?.en || flour.id) + " (" + flour.id + ")";
+      els.flour.appendChild(opt);
+    }
+  }
+
+  function productCard(product) {
+    const flour = flourById[product.flour_catalog_item_id];
+    const name = flour ? (flour.names?.en || flour.id) : product.flour_catalog_item_id;
+    const el = document.createElement("article");
+    el.className = "card";
+    el.innerHTML =
+      '<div class="thumb" style="background:var(--accent-soft)">🔗</div>' +
+      '<div class="card-body">' +
+      '<p class="card-name">' + (product.label || name) + "</p>" +
+      '<p class="card-sub"><a href="' + product.url + '" target="_blank" rel="noopener">' + product.url + "</a></p>" +
+      '<div class="badges"><span class="badge">' + name + "</span></div>" +
+      '<div class="meta-line">' + product.flour_catalog_item_id + "</div>" +
+      '<button type="button" class="danger" data-id="' + product.id + '" style="margin-top:10px;">Remove</button>' +
+      "</div>";
+    el.querySelector("button").addEventListener("click", () => removeProduct(product.id));
+    return el;
+  }
+
+  async function loadProducts() {
+    setStatus(els.listStatus, "Loading…");
+    els.grid.innerHTML = "";
+    try {
+      const data = await apiFetch("/flour-products");
+      if (!data.items.length) {
+        setStatus(els.listStatus, "No products linked yet.");
+        return;
+      }
+      setStatus(els.listStatus, data.items.length + " linked product" + (data.items.length === 1 ? "" : "s") + ".");
+      const frag = document.createDocumentFragment();
+      for (const product of data.items) frag.appendChild(productCard(product));
+      els.grid.appendChild(frag);
+    } catch (e) {
+      setStatus(els.listStatus, "Couldn't reach flour-service: " + e.message, "error");
+    }
+  }
+
+  async function removeProduct(id) {
+    try {
+      await apiFetch("/flour-products/" + id, { method: "DELETE" });
+      loadProducts();
+    } catch (e) {
+      setStatus(els.status, "Couldn't remove product: " + e.message, "error");
+    }
+  }
+
+  els.form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    setStatus(els.status, "Saving…");
+    try {
+      await apiFetch("/flour-products", {
+        method: "POST",
+        body: JSON.stringify({
+          url: els.url.value.trim(),
+          flour_catalog_item_id: els.flour.value,
+          label: els.label.value.trim() || null,
+        }),
+      });
+      setStatus(els.status, "Product added.", "ok");
+      els.form.reset();
+      loadProducts();
+    } catch (e) {
+      setStatus(els.status, "Couldn't add product: " + e.message, "error");
+    }
+  });
+
+  checkPersistence();
+  loadCatalogue()
+    .then(loadProducts)
+    .catch((e) => setStatus(els.status, "Couldn't load flour catalogue: " + e.message, "error"));
+})();
+</script>
+</body>
+</html>

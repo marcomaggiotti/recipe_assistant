@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>New Recipe</title>
+<link rel="stylesheet" href="/static/theme.css">
+</head>
+<body>
+<nav class="topnav"><div class="inner">
+  <a class="brand" href="/">Pizza Service</a>
+  <a class="navlink" href="/flour-explorer">Flour Explorer</a>
+  <a class="navlink" href="/flour-products/new">Add Flour Product</a>
+  <a class="navlink active" href="/new-recipe">New Recipe</a>
+</div></nav>
+<div class="wrap">
+  <header class="page-head">
+    <h1>New Recipe</h1>
+    <p class="subtitle">Build a dough formula (pizza or bread - the technique/style below is what shapes it) from a flour blend, and save it.</p>
+    <p class="source-note">Flour options from <a href="__FLOUR_SERVICE_URL__/docs" target="_blank" rel="noopener">flour-service</a>; saved via this service's own <code>POST /recipes</code>.</p>
+  </header>
+
+  <form class="panel grid-fields" id="recipe-form">
+    <div class="field wide">
+      <label for="f-name">Recipe name (optional)</label>
+      <input id="f-name" type="text" placeholder="e.g. Sunday country loaf">
+    </div>
+    <div class="field">
+      <label for="f-style">Style</label>
+      <select id="f-style"><option value="custom">Custom</option></select>
+    </div>
+    <div class="field">
+      <label for="f-technique">Technique</label>
+      <select id="f-technique">
+        <option value="direct">Direct</option>
+        <option value="same_day">Same day</option>
+        <option value="poolish">Poolish preferment</option>
+        <option value="biga">Biga preferment</option>
+        <option value="sourdough">Sourdough</option>
+        <option value="cold_ferment_24h">Cold ferment 24h</option>
+        <option value="cold_ferment_48h">Cold ferment 48h</option>
+        <option value="cold_ferment_72h">Cold ferment 72h</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="f-ballweight">Ball weight (g, optional)</label>
+      <input id="f-ballweight" type="number" min="1" step="1" placeholder="style default">
+    </div>
+
+    <div class="field wide">
+      <label>Flour blend (baker's %, don't need to sum to 100)</label>
+      <div id="blend-rows"></div>
+      <button type="button" id="add-row-btn" style="align-self:flex-start;">+ Add flour</button>
+    </div>
+
+    <details class="advanced">
+      <summary>Advanced overrides &amp; API key</summary>
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px 16px; margin-top:10px;">
+        <div class="field"><label for="f-hydration">Hydration % (optional)</label><input id="f-hydration" type="number" step="0.1" placeholder="style default"></div>
+        <div class="field"><label for="f-salt">Salt % (optional)</label><input id="f-salt" type="number" step="0.1" placeholder="style default"></div>
+        <div class="field"><label for="f-oil">Oil % (optional)</label><input id="f-oil" type="number" step="0.1" placeholder="style default"></div>
+        <div class="field"><label for="f-yeast">Yeast % (optional)</label><input id="f-yeast" type="number" step="0.01" placeholder="technique default"></div>
+        <div class="field"><label for="f-poolish">Poolish % (optional)</label><input id="f-poolish" type="number" step="1" placeholder="40"></div>
+        <div class="field"><label for="f-biga">Biga % (optional)</label><input id="f-biga" type="number" step="1" placeholder="40"></div>
+        <div class="field"><label for="f-sourdough">Sourdough starter % (optional)</label><input id="f-sourdough" type="number" step="1" placeholder="20"></div>
+        <div class="field"><label for="f-apikey">API key (only if this service requires one)</label><input id="f-apikey" type="password" autocomplete="off" placeholder="X-API-Key"></div>
+      </div>
+    </details>
+
+    <div class="actions-row">
+      <button type="submit" class="primary">Save recipe</button>
+    </div>
+  </form>
+
+  <div id="status" role="status" aria-live="polite"></div>
+  <div id="result" class="panel" style="display:none;"></div>
+
+  <h2 style="font-size:1.05rem;">Recently saved</h2>
+  <div id="list-status" class="status-line"></div>
+  <div id="recent-list"></div>
+</div>
+
+<script>
+(function () {
+  const FLOUR_SERVICE_BASE = "__FLOUR_SERVICE_URL__";
+  const TECHNIQUE_LABELS = {
+    direct: "Direct", same_day: "Same day", poolish: "Poolish preferment", biga: "Biga preferment",
+    sourdough: "Sourdough", cold_ferment_24h: "Cold ferment 24h", cold_ferment_48h: "Cold ferment 48h",
+    cold_ferment_72h: "Cold ferment 72h",
+  };
+  let styleDefaults = {};
+  let blendRowCount = 0;
+
+  const els = {
+    form: document.getElementById("recipe-form"),
+    name: document.getElementById("f-name"),
+    style: document.getElementById("f-style"),
+    technique: document.getElementById("f-technique"),
+    ballWeight: document.getElementById("f-ballweight"),
+    blendRows: document.getElementById("blend-rows"),
+    addRowBtn: document.getElementById("add-row-btn"),
+    hydration: document.getElementById("f-hydration"),
+    salt: document.getElementById("f-salt"),
+    oil: document.getElementById("f-oil"),
+    yeast: document.getElementById("f-yeast"),
+    poolish: document.getElementById("f-poolish"),
+    biga: document.getElementById("f-biga"),
+    sourdough: document.getElementById("f-sourdough"),
+    apikey: document.getElementById("f-apikey"),
+    status: document.getElementById("status"),
+    result: document.getElementById("result"),
+    listStatus: document.getElementById("list-status"),
+    recentList: document.getElementById("recent-list"),
+  };
+
+  function authHeaders(json) {
+    const key = els.apikey.value.trim();
+    const headers = key ? { "X-API-Key": key } : {};
+    if (json) headers["Content-Type"] = "application/json";
+    return headers;
+  }
+
+  async function ownFetch(path, options) {
+    const res = await fetch(path, { ...options, headers: { ...authHeaders(!!options?.body), ...(options?.headers || {}) } });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || (res.status + " " + res.statusText));
+    return body;
+  }
+
+  async function flourServiceFetch(path) {
+    const res = await fetch(FLOUR_SERVICE_BASE + path);
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || res.statusText);
+    return res.json();
+  }
+
+  function setStatus(el, text, cls) {
+    el.textContent = text || "";
+    el.classList.remove("error", "ok");
+    if (cls) el.classList.add(cls);
+  }
+
+  function addBlendRow(flourOptions) {
+    blendRowCount += 1;
+    const rowId = "row" + blendRowCount;
+    const row = document.createElement("div");
+    row.className = "blend-row";
+    row.dataset.rowId = rowId;
+    const select = document.createElement("select");
+    select.innerHTML = flourOptions;
+    select.required = true;
+    const ash = document.createElement("input");
+    ash.type = "number"; ash.step = "0.01"; ash.min = "0"; ash.max = "3"; ash.placeholder = "ash% (optional)";
+    const percent = document.createElement("input");
+    percent.type = "number"; percent.step = "0.1"; percent.min = "0"; percent.required = true; percent.placeholder = "%";
+    percent.value = blendRowCount === 1 ? "70" : blendRowCount === 2 ? "30" : "";
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button"; removeBtn.textContent = "Remove";
+    removeBtn.addEventListener("click", () => row.remove());
+
+    const wrapField = (labelText, input) => {
+      const field = document.createElement("div");
+      field.className = "field";
+      const label = document.createElement("label");
+      label.textContent = labelText;
+      field.appendChild(label);
+      field.appendChild(input);
+      return field;
+    };
+
+    row.appendChild(wrapField("Flour", select));
+    row.appendChild(wrapField("Ash %", ash));
+    row.appendChild(wrapField("Percent", percent));
+    row.appendChild(removeBtn);
+    els.blendRows.appendChild(row);
+  }
+
+  async function loadFlourOptions() {
+    const data = await flourServiceFetch("/flours");
+    const sorted = [...data.items].sort((a, b) => (a.names?.en || a.id).localeCompare(b.names?.en || b.id));
+    const options = sorted.map((f) => '<option value="' + f.id + '">' + (f.names?.en || f.id) + " (" + f.id + ")</option>").join("");
+    addBlendRow(options);
+    addBlendRow(options);
+  }
+
+  async function loadStyles() {
+    const styles = await ownFetch("/recipes/styles");
+    els.style.innerHTML = "";
+    for (const s of styles) {
+      styleDefaults[s.style] = s;
+      const opt = document.createElement("option");
+      opt.value = s.style;
+      opt.textContent = s.style_attribution.label;
+      els.style.appendChild(opt);
+    }
+    els.style.value = "custom";
+  }
+
+  els.style.addEventListener("change", () => {
+    const s = styleDefaults[els.style.value];
+    if (s) els.technique.value = s.technique;
+  });
+
+  els.addRowBtn.addEventListener("click", async () => {
+    try {
+      const data = await flourServiceFetch("/flours");
+      const sorted = [...data.items].sort((a, b) => (a.names?.en || a.id).localeCompare(b.names?.en || b.id));
+      const options = sorted.map((f) => '<option value="' + f.id + '">' + (f.names?.en || f.id) + " (" + f.id + ")</option>").join("");
+      addBlendRow(options);
+    } catch (e) {
+      setStatus(els.status, "Couldn't reach flour-service: " + e.message, "error");
+    }
+  });
+
+  function numOrUndefined(input) {
+    const v = input.value.trim();
+    return v === "" ? undefined : parseFloat(v);
+  }
+
+  function collectFlours() {
+    const rows = Array.from(els.blendRows.querySelectorAll(".blend-row"));
+    return rows.map((row) => {
+      const [select, ashField, percentField] = row.querySelectorAll("select, input");
+      const flour = { pizza_flours_id: select.value, percent: parseFloat(percentField.value) };
+      const ash = ashField.value.trim();
+      if (ash !== "") flour["ash%"] = parseFloat(ash);
+      return flour;
+    });
+  }
+
+  function renderResult(recipe) {
+    els.result.style.display = "block";
+    const flourLines = recipe.flours.map((f) => "<li>" + f.pizza_flours_id + " - " + f.percent + "% (" + f.grams + "g)</li>").join("");
+    els.result.innerHTML =
+      "<h2 style='margin-top:0;font-size:1.05rem;'>Saved: " + (recipe.name || recipe.style_attribution.label) + "</h2>" +
+      "<p class='meta-line'>" + recipe.technique + " · " + recipe.style_attribution.label + "</p>" +
+      "<ul>" + flourLines + "</ul>" +
+      "<p class='meta-line'>Flour " + recipe.ingredients_per_ball.flour_g + "g · Water " + recipe.ingredients_per_ball.water_g +
+      "g · Salt " + recipe.ingredients_per_ball.salt_g + "g · Oil " + recipe.ingredients_per_ball.oil_g + "g</p>" +
+      (recipe.warnings.length ? "<p class='status-line error'>" + recipe.warnings.join(" · ") + "</p>" : "");
+  }
+
+  function recentCard(recipe) {
+    const el = document.createElement("article");
+    el.className = "card";
+    el.innerHTML =
+      '<div class="card-body">' +
+      '<p class="card-name">' + recipe.name + "</p>" +
+      '<p class="card-sub">' + recipe.technique + " · " + recipe.style_attribution.label + "</p>" +
+      "</div>";
+    return el;
+  }
+
+  async function loadRecent() {
+    setStatus(els.listStatus, "Loading…");
+    els.recentList.innerHTML = "";
+    try {
+      const data = await ownFetch("/recipes?limit=6");
+      if (!data.items.length) {
+        setStatus(els.listStatus, "No recipes saved yet.");
+        return;
+      }
+      setStatus(els.listStatus, data.count + " saved recipe" + (data.count === 1 ? "" : "s") + ".");
+      const grid = document.createElement("div");
+      grid.className = "grid";
+      for (const recipe of data.items) grid.appendChild(recentCard(recipe));
+      els.recentList.appendChild(grid);
+    } catch (e) {
+      setStatus(els.listStatus, "Couldn't load recent recipes: " + e.message, "error");
+    }
+  }
+
+  els.form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    setStatus(els.status, "Saving…");
+    els.result.style.display = "none";
+    const body = {
+      flours: collectFlours(),
+      technique: els.technique.value,
+      style: els.style.value,
+    };
+    if (els.name.value.trim()) body.name = els.name.value.trim();
+    const ballWeight = numOrUndefined(els.ballWeight);
+    if (ballWeight !== undefined) body.ball_weight_g = ballWeight;
+    const hydration = numOrUndefined(els.hydration);
+    if (hydration !== undefined) body.hydration_pct = hydration;
+    const salt = numOrUndefined(els.salt);
+    if (salt !== undefined) body.salt_pct = salt;
+    const oil = numOrUndefined(els.oil);
+    if (oil !== undefined) body.oil_pct = oil;
+    const yeast = numOrUndefined(els.yeast);
+    if (yeast !== undefined) body.yeast_pct = yeast;
+    const poolish = numOrUndefined(els.poolish);
+    if (poolish !== undefined) body.poolish_percentage = poolish;
+    const biga = numOrUndefined(els.biga);
+    if (biga !== undefined) body.biga_percentage = biga;
+    const sourdough = numOrUndefined(els.sourdough);
+    if (sourdough !== undefined) body.sourdough_percentage = sourdough;
+
+    try {
+      const recipe = await ownFetch("/recipes", { method: "POST", body: JSON.stringify(body) });
+      setStatus(els.status, "Recipe saved.", "ok");
+      renderResult(recipe);
+      loadRecent();
+    } catch (e) {
+      setStatus(els.status, "Couldn't save recipe: " + e.message, "error");
+    }
+  });
+
+  loadStyles().catch((e) => setStatus(els.status, "Couldn't load styles: " + e.message, "error"));
+  loadFlourOptions().catch((e) => setStatus(els.status, "Couldn't reach flour-service: " + e.message, "error"));
+  loadRecent();
+})();
+</script>
+</body>
+</html>

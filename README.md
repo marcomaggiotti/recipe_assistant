@@ -23,21 +23,40 @@ as a standalone, self-contained service (own dependencies, Dockerfile, config).
 | GET    | `/recipes/{id}`   | Get one saved recipe (`?num_balls=N`, default 1)               |
 | DELETE | `/recipes/{id}`   | Delete a saved recipe                                          |
 | POST   | `/agent/chat`     | Natural-language agent chat over recipe generation/storage    |
+| GET    | `/`               | Browser page - home/nav menu |
 | GET    | `/flour-explorer` | Browser page - filterable thumbnail grid over the flour catalogue |
+| GET    | `/flour-products/new` | Browser page - link a real product URL to a flour_catalog entry |
+| GET    | `/new-recipe`     | Browser page - build and save a recipe from a flour blend |
 
-All endpoints except `/health` and `/flour-explorer` require header `X-API-Key` if
-`API_KEY` is set in the environment; leave it empty for local dev.
+All JSON API endpoints except `/health` require header `X-API-Key` if `API_KEY` is set
+in the environment (leave it empty for local dev); the browser pages themselves never
+require it (they're public HTML, not part of the JSON API surface), though the
+flour-service calls they make client-side respect an optional API key entered on the
+page if that service has its own `API_KEY` set.
 
-### Flour Explorer page
+### Browser pages
 
-`GET /flour-explorer` serves a small, dependency-free HTML/JS page (no frontend build
-step) that queries [flour-service](https://github.com/marcomaggiotti/flour_service)
-directly from the browser - filter by category, gluten, bread/pizza suitability,
-strength tier, or ash%, or look up one flour by name/national type code - and renders
-the results as a thumbnail card grid. It's a live view (no local copy of the
-catalogue): set `FLOUR_SERVICE_URL` to point it at a different deployment (default
-`https://flour-service.onrender.com`), e.g. `http://localhost:8001` if you're running
-flour-service locally too.
+Four small, dependency-free HTML/JS pages (no frontend build step, shared styling via
+`app/static/theme.css`), served directly by this FastAPI app:
+
+- **`/`** - home page with a nav menu linking the other three, plus `/docs`.
+- **`/flour-explorer`** - queries [flour-service](https://github.com/marcomaggiotti/flour_service)
+  directly from the browser; filter by category, gluten, bread/pizza suitability,
+  strength tier, or ash%, or look up one flour by name/national type code. Renders
+  results as a thumbnail card grid. Live view, no local copy of the catalogue.
+- **`/flour-products/new`** - link a real product page URL (e.g. a Migros/Coop listing)
+  to a `flour_catalog` entry via flour-service's `POST /flour-products`, and see/remove
+  what's already linked. Warns if flour-service is currently running with an in-memory
+  backend (added products would be lost on its next restart).
+- **`/new-recipe`** - build a dough formula (flour blend rows populated from
+  flour-service, technique, style, optional hydration/salt/oil/yeast/preferment
+  overrides) and save it via this service's own `POST /recipes`; shows the computed
+  result and a list of recently saved recipes. Deliberately not at `/recipes/new` -
+  that would collide with `GET /recipes/{item_id}`.
+
+All of them call `flour-service` directly from client-side JS: set `FLOUR_SERVICE_URL`
+to point at a different deployment (default `https://flour-service.onrender.com`), e.g.
+`http://localhost:8001` if you're running flour-service locally too.
 
 ## The recipe model
 
