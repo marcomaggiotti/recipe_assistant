@@ -38,8 +38,8 @@ separate, query-time concern (`?num_balls=N` on `/recipes/generate` and
 {
   "name": "Friday pizza night",
   "flours": [
-    {"description": "soft_wheat_00", "ash%": 0.55, "percent": 80},
-    {"description": "whole_wheat", "percent": 20}
+    {"pizza_flours_id": "soft_wheat_00", "ash%": 0.55, "percent": 80},
+    {"pizza_flours_id": "whole_wheat", "percent": 20}
   ],
   "technique": "poolish",
   "style": "ny_style",
@@ -52,7 +52,7 @@ separate, query-time concern (`?num_balls=N` on `/recipes/generate` and
 ```
 
 - `flours` - baker's percentages of the blend relative to each other; they don't need to
-  sum to exactly 100, they're normalized (with a warning) if not. Every `description` must
+  sum to exactly 100, they're normalized (with a warning) if not. Every `pizza_flours_id` must
   match an entry in the flour catalogue (see below) - its `id` or one of its localized
   names/codes; anything else is rejected with a 400. `ash%` is optional and only
   meaningful for milled wheat flours (e.g. `0.55` for Italian Tipo 00, per DPR 187/2001) -
@@ -83,7 +83,7 @@ style's attribution.
 
 ### International flour catalogue
 
-Every `flours[].description` cited in a request must match an entry from
+Every `flours[].pizza_flours_id` cited in a request must match an entry from
 `GET /recipes/flours` - matched case-insensitively against that entry's `id` or any of
 its localized names/codes, so you can use whatever your country calls it: `"00"`,
 `"Farina 00"`, `"Weizenmehl 405"`, and `"T45"` all resolve to the same `soft_wheat_00`

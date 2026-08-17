@@ -23,7 +23,7 @@ class FlourComponent(BaseModel):
                     "cross-checked against the resolved flour's ash range and used to disambiguate "
                     "'description's that match more than one catalogue entry.",
     )
-    description: str = Field(
+    pizza_flours_id: str = Field(
         min_length=1,
         description="Flour name, e.g. 'Italian 00 flour', 'Whole wheat', 'Semola rimacinata'. Must "
                     "resolve to an entry in GET /recipes/flours (its id or one of its localized "
