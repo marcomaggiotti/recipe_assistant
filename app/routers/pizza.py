@@ -45,8 +45,8 @@ def compute_recipe(request: RecipeGenerateRequest) -> dict:
         raise HTTPException(status_code=400, detail=f"unknown style '{request.style}'")
 
     catalog = get_flour_catalog_store()
-    resolved = [(f, catalog.resolve(f.description, f.ash_pct)) for f in request.flours]
-    unknown = [f.description for f, flour in resolved if flour is None]
+    resolved = [(f, catalog.resolve(f.pizza_flours_id, f.ash_pct)) for f in request.flours]
+    unknown = [f.pizza_flours_id for f, flour in resolved if flour is None]
     if unknown:
         raise HTTPException(
             status_code=400,
@@ -54,7 +54,7 @@ def compute_recipe(request: RecipeGenerateRequest) -> dict:
         )
 
     ash_warnings = [
-        f"ash% {f.ash_pct} for '{f.description}' is outside {flour['id']}'s typical "
+        f"ash% {f.ash_pct} for '{f.pizza_flours_id}' is outside {flour['id']}'s typical "
         f"{flour['ash_min_pct']}-{flour['ash_max_pct']}% range"
         for f, flour in resolved
         if f.ash_pct is not None and flour.get("ash_min_pct") is not None and not (
@@ -107,7 +107,7 @@ def list_styles():
 
 @router.get("/flours")
 def list_flours():
-    """The international flour catalogue - every flours[].description in a recipe
+    """The international flour catalogue - every flours[].pizza_flours_id in a recipe
     request must match one of these entries' id or one of its localized names/codes.
     Entries covering milled wheat refinement grades (soft wheat, rye, spelt) also carry
     ash_min_pct/ash_max_pct, the ash content (% per 100g) that grade corresponds to."""

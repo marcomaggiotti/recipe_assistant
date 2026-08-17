@@ -8,7 +8,7 @@ from app.schemas import GeneratedRecipe, StyleAttribution, StyleInfo
 client = TestClient(app)
 
 # Valid catalogue flour types (see app/flours.py) used across API-level tests, which
-# validate flours[].description against the flour catalogue.
+# validate flours[].pizza_flours_id against the flour catalogue.
 SOFT_WHEAT_00 = "soft_wheat_00"
 WHOLE_WHEAT = "whole_wheat"
 
@@ -184,7 +184,7 @@ def test_api_generate_endpoint():
         "/recipes/generate",
         params={"num_balls": 3},
         json={
-            "flours": [{"description": SOFT_WHEAT_00, "percent": 90}, {"description": WHOLE_WHEAT, "percent": 10}],
+            "flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 90}, {"pizza_flours_id": WHOLE_WHEAT, "percent": 10}],
             "technique": "cold_ferment_48h",
             "style": "ny_style",
         },
@@ -196,10 +196,36 @@ def test_api_generate_endpoint():
     assert body["style_attribution"]["author"] == "Tony Gemignani"
 
 
+def test_api_generate_passes_through_brand_description():
+    response = client.post(
+        "/recipes/generate",
+        json={
+            "flours": [
+                {"pizza_flours_id": "durum_semolina", "description": "Semola Caputo", "percent": 70},
+                {"pizza_flours_id": SOFT_WHEAT_00, "description": "Naturaplan Bio CH Weissmehl Coop", "percent": 30},
+            ],
+            "technique": "direct",
+        },
+    )
+    assert response.status_code == 200
+    flours = {f["pizza_flours_id"]: f for f in response.json()["flours"]}
+    assert flours["durum_semolina"]["description"] == "Semola Caputo"
+    assert flours[SOFT_WHEAT_00]["description"] == "Naturaplan Bio CH Weissmehl Coop"
+
+
+def test_api_generate_omits_description_when_unset():
+    response = client.post(
+        "/recipes/generate",
+        json={"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}], "technique": "direct"},
+    )
+    assert response.status_code == 200
+    assert response.json()["flours"][0]["description"] is None
+
+
 def test_api_generate_defaults_to_one_ball():
     response = client.post(
         "/recipes/generate",
-        json={"flours": [{"description": SOFT_WHEAT_00, "percent": 100}], "technique": "direct"},
+        json={"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}], "technique": "direct"},
     )
     assert response.status_code == 200
     body = response.json()
@@ -212,7 +238,7 @@ def test_api_save_list_get_delete_roundtrip():
         "/recipes",
         json={
             "name": "Friday night pizza",
-            "flours": [{"description": SOFT_WHEAT_00, "percent": 100}],
+            "flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}],
             "technique": "direct",
         },
     )
@@ -268,7 +294,7 @@ def test_style_info_shares_field_names_with_generated_recipe():
 def test_api_rejects_bad_technique():
     response = client.post(
         "/recipes/generate",
-        json={"flours": [{"description": SOFT_WHEAT_00, "percent": 100}], "technique": "invalid"},
+        json={"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}], "technique": "invalid"},
     )
     assert response.status_code == 422
 
@@ -277,7 +303,7 @@ def test_api_rejects_unknown_style():
     response = client.post(
         "/recipes/generate",
         json={
-            "flours": [{"description": SOFT_WHEAT_00, "percent": 100}],
+            "flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}],
             "technique": "direct",
             "style": "does_not_exist",
         },
@@ -288,7 +314,7 @@ def test_api_rejects_unknown_style():
 def test_api_rejects_unknown_flour():
     response = client.post(
         "/recipes/generate",
-        json={"flours": [{"description": "moon dust", "percent": 100}], "technique": "direct"},
+        json={"flours": [{"pizza_flours_id": "moon dust", "percent": 100}], "technique": "direct"},
     )
     assert response.status_code == 400
     assert "unknown flour type" in response.json()["detail"]
@@ -314,7 +340,7 @@ def test_api_flours_endpoint_exposes_ash_content():
 def test_api_generate_accepts_matching_ash_pct_without_warning():
     response = client.post(
         "/recipes/generate",
-        json={"flours": [{"description": SOFT_WHEAT_00, "ash%": 0.50, "percent": 100}], "technique": "direct"},
+        json={"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "ash%": 0.50, "percent": 100}], "technique": "direct"},
     )
     assert response.status_code == 200
     assert not any("ash%" in w for w in response.json()["warnings"])
@@ -323,7 +349,7 @@ def test_api_generate_accepts_matching_ash_pct_without_warning():
 def test_api_generate_warns_on_mismatched_ash_pct():
     response = client.post(
         "/recipes/generate",
-        json={"flours": [{"description": SOFT_WHEAT_00, "ash%": 1.50, "percent": 100}], "technique": "direct"},
+        json={"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "ash%": 1.50, "percent": 100}], "technique": "direct"},
     )
     assert response.status_code == 200
     assert any("ash%" in w for w in response.json()["warnings"])
@@ -333,7 +359,7 @@ def test_api_generate_accepts_poolish_percentage():
     response = client.post(
         "/recipes/generate",
         json={
-            "flours": [{"description": SOFT_WHEAT_00, "percent": 65}, {"description": WHOLE_WHEAT, "percent": 35}],
+            "flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 65}, {"pizza_flours_id": WHOLE_WHEAT, "percent": 35}],
             "technique": "poolish",
             "poolish_percentage": 40,
             "hydration_pct": 76,
@@ -347,7 +373,7 @@ def test_api_generate_accepts_poolish_percentage():
 def test_api_generate_accepts_biga_and_sourdough_percentage():
     biga = client.post(
         "/recipes/generate",
-        json={"flours": [{"description": SOFT_WHEAT_00, "percent": 100}], "technique": "biga", "biga_percentage": 55},
+        json={"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}], "technique": "biga", "biga_percentage": 55},
     )
     assert biga.status_code == 200
     assert biga.json()["leavening"]["percent_of_flour"] == 55
@@ -355,7 +381,7 @@ def test_api_generate_accepts_biga_and_sourdough_percentage():
     sourdough = client.post(
         "/recipes/generate",
         json={
-            "flours": [{"description": SOFT_WHEAT_00, "percent": 100}],
+            "flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}],
             "technique": "sourdough",
             "sourdough_percentage": 25,
         },

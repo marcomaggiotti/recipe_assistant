@@ -80,3 +80,17 @@ def test_build_flour_catalog_store_defaults_to_in_memory_for_non_cosmos_backends
     for backend in ("sqlite", "postgres"):
         store = build_flour_catalog_store(Settings(db_backend=backend))
         assert isinstance(store, InMemoryFlourCatalogStore)
+
+
+def test_catalog_entries_carry_pizza_flours_id_matching_their_id():
+    for flour in FLOUR_CATALOG:
+        assert flour["pizza_flours_id"] == flour["id"]
+
+
+def test_catalog_entries_carry_description_mirroring_notes():
+    for flour in FLOUR_CATALOG:
+        assert flour["description"] == flour.get("notes")
+    with_notes = next(f for f in FLOUR_CATALOG if f.get("notes"))
+    assert with_notes["description"] == with_notes["notes"]
+    without_notes = next(f for f in FLOUR_CATALOG if not f.get("notes"))
+    assert without_notes["description"] is None

@@ -21,13 +21,19 @@ class FlourComponent(BaseModel):
                     "187/2001). Only meaningful for milled wheat flours; leave unset for flours "
                     "without a tracked ash grade (rice, legumes, starches, ...). When set, it is "
                     "cross-checked against the resolved flour's ash range and used to disambiguate "
-                    "'description's that match more than one catalogue entry.",
+                    "'pizza_flours_id's that match more than one catalogue entry.",
     )
-    description: str = Field(
+    pizza_flours_id: str = Field(
         min_length=1,
         description="Flour name, e.g. 'Italian 00 flour', 'Whole wheat', 'Semola rimacinata'. Must "
                     "resolve to an entry in GET /recipes/flours (its id or one of its localized "
                     "names/codes).",
+    )
+    description: str | None = Field(
+        default=None,
+        description="Free-text note for the specific brand/product used for this flour, e.g. "
+                    "'Semola Caputo' or 'Naturaplan Bio CH Weissmehl Coop'. Purely informational - "
+                    "not matched against the catalogue and not used to resolve pizza_flours_id.",
     )
     percent: float = Field(gt=0, description="Baker's % of this flour relative to the total flour blend")
 
