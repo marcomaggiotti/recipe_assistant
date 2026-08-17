@@ -1,10 +1,12 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
-from .routers import agent, flour_explorer, health, pizza
+from .routers import agent, health, pages, pizza
 from .routers.pizza import get_flour_catalog_store, get_repo, get_style_store
 
 settings = get_settings()
@@ -38,7 +40,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.mount("/static", StaticFiles(directory=Path(__file__).resolve().parent / "static"), name="static")
+
 app.include_router(health.router)
 app.include_router(pizza.router)
 app.include_router(agent.router)
-app.include_router(flour_explorer.router)
+app.include_router(pages.router)
