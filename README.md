@@ -93,7 +93,11 @@ flour. The catalogue covers wheat (soft wheat types 00/0/1/2, whole wheat, Manit
 durum, Italian ancient-grain landraces), rye, oats, gluten-free cereals (rice, corn,
 millet, sorghum, teff, ...), legumes, nuts/seeds, tubers/starches, and a few specialty
 flours - ~60 entries in total, each with `id`, `category`, `gluten`, `bread`/`pizza`
-suitability, `max_blend_pct`, and localized `names` (en/it/fr/de).
+suitability, `max_blend_pct`, and localized `names` (en/it/fr/de). Each entry also
+carries `pizza_flours_id` (mirrors `id`) and `description` (mirrors `notes` where an
+entry has one, else unset) - the same field names used on a recipe request's
+`flours[]`, though there they mean something request-specific: `pizza_flours_id` is
+the caller's lookup key, and `description` is a free-text brand/product note.
 
 Entries for milled wheat refinement grades (the soft-wheat 00/0/1/2/whole-wheat ladder,
 rye, spelt) also carry `ash_min_pct`/`ash_max_pct` - the ash content (% per 100g of

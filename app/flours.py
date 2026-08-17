@@ -1,13 +1,14 @@
 """International flour catalogue.
 
 Every flour cited when creating a recipe (POST /recipes, /recipes/generate, and the
-agent's generate/save tools) is identified by its `description` field, which must
+agent's generate/save tools) is identified by its `pizza_flours_id` field, which must
 resolve to one of the entries below - matched against the entry's id or any of its
 localized names/codes, case-insensitively - so a caller can use whatever name or type
 code their country uses ("00", "farina 00", "weizenmehl 405", "t45", "405", ... all
 resolve to the same flour). Callers may additionally pass `ash%`, the flour's ash
 content, which is cross-checked against the resolved entry's ash_min_pct/ash_max_pct
-(when tracked) and used to disambiguate `description`s that match more than one entry.
+(when tracked) and used to disambiguate `pizza_flours_id`s that match more than one
+entry.
 
 Ash content (`ash_min_pct`/`ash_max_pct`, in % per 100g of flour) is only tracked for
 flours covered by WHEAT_CLASSIFICATIONS below (the soft-wheat refinement grades,
@@ -15,12 +16,20 @@ rye, spelt) - it's the milling-refinement indicator behind systems like Italy's
 00/0/1/2/integrale, Germany's 405-1600, and France's T45-T150. Flours outside that
 table (durum, ancient wheats, rice, legumes, starches, ...) have no ash field.
 
+Each catalogue entry also carries its own top-level `pizza_flours_id` (mirroring `id`)
+and `description` (mirroring `notes` where set, else unset) - not to be confused with
+the same-named fields on a recipe request's flours[] entries (a request's
+pizza_flours_id is the caller-supplied lookup key; a catalogue entry's is the resolved
+id echoed back. A request's description is a free-text brand/product note; a catalogue
+entry's is the flour type's own descriptive note).
+
 FLOUR_CATALOG is seed data. When DB_BACKEND=cosmos, it's written into its own Cosmos
 container (COSMOS_FLOURS_CONTAINER, default "pizza_flours") on first use and served
 from there afterwards - mirrors styles.py's StyleStore. Non-Cosmos backends (local
 dev, tests) just serve the seed data directly. A container seeded before the ash
-fields were added won't pick them up automatically (seeding only runs when the
-container is empty) - see scripts/backfill_flour_ash.py to update it in place.
+fields (or pizza_flours_id/description) were added won't pick them up automatically
+(seeding only runs when the container is empty) - see scripts/backfill_flour_ash.py
+and scripts/backfill_flour_pizza_flours_id.py to update it in place.
 """
 from __future__ import annotations
 
@@ -227,6 +236,15 @@ FLOUR_CATALOG: list[dict[str, Any]] = [
      "notes": "Diastatic malt, dough improver",
      "names": {"en": "Diastatic malt flour", "it": "Malto diastasico", "fr": "Farine de malt", "de": "Malzmehl"}},
 ]
+
+# Mirrors the flours[].pizza_flours_id/description fields used on recipe requests (see
+# app/schemas.py) onto every catalogue entry, so a client can read the same field names
+# from GET /recipes/flours: pizza_flours_id is just the entry's own id; description is
+# copied from notes where an entry has one, else left unset.
+for _flour in FLOUR_CATALOG:
+    _flour["pizza_flours_id"] = _flour["id"]
+    _flour["description"] = _flour.get("notes")
+del _flour
 
 # Bare national type-code aliases (from WHEAT_CLASSIFICATIONS) that aren't already
 # spelled out in a flour's own `names` above - e.g. so "00", "T45", or "405" alone
