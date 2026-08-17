@@ -32,6 +32,11 @@ class Settings(BaseSettings):
 
     cors_allow_origins: str = "*"
 
+    # Standalone flour-catalogue microservice (github.com/marcomaggiotti/flour_service)
+    # - the /flour-explorer page's JS calls this directly from the browser, no backend
+    # proxying involved. Override for local dev (e.g. http://localhost:8001).
+    flour_service_url: str = "https://flour-service.onrender.com"
+
 
 @lru_cache
 def get_settings() -> Settings:
