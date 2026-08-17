@@ -38,8 +38,8 @@ separate, query-time concern (`?num_balls=N` on `/recipes/generate` and
 {
   "name": "Friday pizza night",
   "flours": [
-    {"pizza_flours_id": "soft_wheat_00", "ash%": 0.55, "percent": 80},
-    {"pizza_flours_id": "whole_wheat", "percent": 20}
+    {"pizza_flours_id": "soft_wheat_00", "ash%": 0.55, "description": "Semola Caputo", "percent": 80},
+    {"pizza_flours_id": "whole_wheat", "description": "Naturaplan Bio CH Weissmehl Coop", "percent": 20}
   ],
   "technique": "poolish",
   "style": "ny_style",
@@ -57,7 +57,9 @@ separate, query-time concern (`?num_balls=N` on `/recipes/generate` and
   names/codes; anything else is rejected with a 400. `ash%` is optional and only
   meaningful for milled wheat flours (e.g. `0.55` for Italian Tipo 00, per DPR 187/2001) -
   when set, it's cross-checked against the resolved flour's ash range and a mismatch is
-  returned as a (non-fatal) warning rather than rejected.
+  returned as a (non-fatal) warning rather than rejected. `description` is an optional
+  free-text note for the specific brand/product used (e.g. `"Semola Caputo"`) - purely
+  informational, not matched against the catalogue.
 - `technique` - one of `direct`, `same_day`, `poolish`, `biga`, `sourdough`,
   `cold_ferment_24h`, `cold_ferment_48h`, `cold_ferment_72h`. Drives the yeast/preferment
   math and the generated fermentation schedule.

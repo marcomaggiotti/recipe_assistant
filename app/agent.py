@@ -24,7 +24,9 @@ TOOLS = [
             "'Farina 00', 'Weizenmehl 405', 'T45' all resolve to the same flour); unrecognized "
             "flour names are rejected. flours[]['ash%'] is optional and only meaningful for "
             "milled wheat flours (e.g. 0.55 for Italian Tipo 00) - it's cross-checked against "
-            "the resolved flour's ash range and helps disambiguate. Any of hydration/salt/oil/"
+            "the resolved flour's ash range and helps disambiguate. flours[].description is an "
+            "optional free-text brand/product note (e.g. 'Semola Caputo') - purely informational, "
+            "not matched against the catalogue. Any of hydration/salt/oil/"
             "yeast % or ball weight left unset falls back to the chosen style's defaults "
             "('custom' style = generic defaults with no attribution). poolish_percentage/"
             "biga_percentage/sourdough_percentage set the preferment's baker's % of total flour "
@@ -43,6 +45,7 @@ TOOLS = [
                         "properties": {
                             "pizza_flours_id": {"type": "string"},
                             "ash%": {"type": "number", "description": "Ash content %, e.g. 0.55 for Italian Tipo 00"},
+                            "description": {"type": "string", "description": "Optional brand/product note, e.g. 'Semola Caputo'"},
                             "percent": {"type": "number"},
                         },
                         "required": ["pizza_flours_id", "percent"],
@@ -81,6 +84,7 @@ TOOLS = [
                         "properties": {
                             "pizza_flours_id": {"type": "string"},
                             "ash%": {"type": "number", "description": "Ash content %, e.g. 0.55 for Italian Tipo 00"},
+                            "description": {"type": "string", "description": "Optional brand/product note, e.g. 'Semola Caputo'"},
                             "percent": {"type": "number"},
                         },
                         "required": ["pizza_flours_id", "percent"],

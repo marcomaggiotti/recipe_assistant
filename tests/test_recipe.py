@@ -196,6 +196,32 @@ def test_api_generate_endpoint():
     assert body["style_attribution"]["author"] == "Tony Gemignani"
 
 
+def test_api_generate_passes_through_brand_description():
+    response = client.post(
+        "/recipes/generate",
+        json={
+            "flours": [
+                {"pizza_flours_id": "durum_semolina", "description": "Semola Caputo", "percent": 70},
+                {"pizza_flours_id": SOFT_WHEAT_00, "description": "Naturaplan Bio CH Weissmehl Coop", "percent": 30},
+            ],
+            "technique": "direct",
+        },
+    )
+    assert response.status_code == 200
+    flours = {f["pizza_flours_id"]: f for f in response.json()["flours"]}
+    assert flours["durum_semolina"]["description"] == "Semola Caputo"
+    assert flours[SOFT_WHEAT_00]["description"] == "Naturaplan Bio CH Weissmehl Coop"
+
+
+def test_api_generate_omits_description_when_unset():
+    response = client.post(
+        "/recipes/generate",
+        json={"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}], "technique": "direct"},
+    )
+    assert response.status_code == 200
+    assert response.json()["flours"][0]["description"] is None
+
+
 def test_api_generate_defaults_to_one_ball():
     response = client.post(
         "/recipes/generate",
