@@ -7,6 +7,13 @@ scaled dough formula with per-ingredient weights and a fermentation schedule.
 All percentages are "baker's percentages": expressed relative to total flour weight
 (flour is always 100%). Flour blend percentages are relative to each other and are
 normalized to sum to 100 before use.
+
+A computed/saved recipe's flour blend lives under `ingredients.flours` (not a
+top-level `flours` key), and its preferment - if `technique` is one of
+PREFERMENT_TECHNIQUES - is echoed back as a single-entry `pre_ferments` list
+(`[{"type": technique, "percentage": ...}]`), empty otherwise. Only one preferment can
+be active per recipe (it's whichever `technique` is set to), so compute_recipe() takes
+one `pre_ferment_percentage` override rather than one per technique.
 """
 from __future__ import annotations
 
@@ -118,6 +125,13 @@ _POOLISH_FLOUR_PCT = 40.0  # % of total flour built into a poolish, unless overr
 _BIGA_FLOUR_PCT = 40.0  # % of total flour built into a biga, unless overridden
 _SOURDOUGH_STARTER_PCT = 20.0  # % of total flour, as mature 100%-hydration starter, unless overridden
 
+# Techniques that build a separate preferment/starter (as opposed to direct/same_day/
+# cold_ferment_* which just use commercial yeast at a length-appropriate %). Only one
+# can be active per recipe - it's whichever `technique` is set to - so a single
+# pre_ferment_percentage override (see compute_recipe) is enough; there's no need for
+# one override field per technique.
+PREFERMENT_TECHNIQUES = ("poolish", "biga", "sourdough")
+
 
 def normalize_flours(flours: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
     total = sum(f["percent"] for f in flours)
@@ -133,14 +147,11 @@ def normalize_flours(flours: list[dict[str, Any]]) -> tuple[list[dict[str, Any]]
 
 def _leavening(
     technique: str, flour_total_g: float, water_total_g: float, yeast_pct_override: float | None,
-    poolish_pct_override: float | None = None,
-    biga_pct_override: float | None = None,
-    sourdough_pct_override: float | None = None,
+    pre_ferment_pct_override: float | None = None,
 ):
     if technique in ("poolish", "biga"):
         default_pct = _POOLISH_FLOUR_PCT if technique == "poolish" else _BIGA_FLOUR_PCT
-        override_pct = poolish_pct_override if technique == "poolish" else biga_pct_override
-        preferment_pct = override_pct if override_pct is not None else default_pct
+        preferment_pct = pre_ferment_pct_override if pre_ferment_pct_override is not None else default_pct
         preferment_flour_g = flour_total_g * preferment_pct / 100
         preferment_hydration = 100.0 if technique == "poolish" else 50.0
         preferment_water_g = preferment_flour_g * preferment_hydration / 100
@@ -166,7 +177,7 @@ def _leavening(
         }, warnings
 
     if technique == "sourdough":
-        starter_pct = sourdough_pct_override if sourdough_pct_override is not None else _SOURDOUGH_STARTER_PCT
+        starter_pct = pre_ferment_pct_override if pre_ferment_pct_override is not None else _SOURDOUGH_STARTER_PCT
         starter_g = flour_total_g * starter_pct / 100
         return {
             "type": "mature sourdough starter (100% hydration)",
@@ -272,9 +283,7 @@ def compute_recipe(
     oil_pct: float | None = None,
     yeast_pct: float | None = None,
     ball_weight_g: float | None = None,
-    poolish_percentage: float | None = None,
-    biga_percentage: float | None = None,
-    sourdough_percentage: float | None = None,
+    pre_ferment_percentage: float | None = None,
 ) -> dict[str, Any]:
     """Computes the dough formula for a SINGLE dough ball of `ball_weight_g` grams -
     this is the reusable "recipe", independent of how many balls you actually want to
@@ -284,10 +293,10 @@ def compute_recipe(
     Cosmos-backed StyleStore in styles.py) instead of looking it up in the in-memory
     STYLE_LIBRARY seed data below.
 
-    poolish_percentage/biga_percentage/sourdough_percentage are each the preferment's
-    baker's percentage (grams of preferment flour per 100g of total flour) - only the
-    one matching `technique` has any effect, and each falls back to a sane default
-    (40% for poolish/biga, 20% for sourdough) when left unset.
+    pre_ferment_percentage is the preferment/starter's baker's percentage (grams of
+    preferment flour per 100g of total flour) - only meaningful when `technique` is one
+    of PREFERMENT_TECHNIQUES (poolish/biga/sourdough), and falls back to a sane default
+    (40% for poolish/biga, 20% for sourdough) when left unset. Ignored otherwise.
     """
     if technique not in TECHNIQUES:
         raise ValueError(f"unknown technique '{technique}', expected one of {TECHNIQUES}")
@@ -314,9 +323,7 @@ def compute_recipe(
 
     leavening, leavening_warnings = _leavening(
         technique, flour_total_g, water_total_g, yeast_pct,
-        poolish_pct_override=poolish_percentage,
-        biga_pct_override=biga_percentage,
-        sourdough_pct_override=sourdough_percentage,
+        pre_ferment_pct_override=pre_ferment_percentage,
     )
     warnings += leavening_warnings
 
@@ -324,6 +331,15 @@ def compute_recipe(
         {**f, "grams": round(flour_total_g * f["percent"] / 100, 1)}
         for f in flours_norm
     ]
+
+    # Echoes back the resolved preferment as a pre_ferments[] entry (empty for
+    # direct/same_day/cold_ferment_* techniques, which don't build one) - mirrors the
+    # request shape (RecipeGenerateRequest.pre_ferments) with the actually-used
+    # percentage (override or default), not just whatever was passed in.
+    pre_ferments_out = (
+        [{"type": technique, "percentage": leavening["percent_of_flour"]}]
+        if technique in PREFERMENT_TECHNIQUES else []
+    )
 
     ingredients_per_ball = {
         "flour_g": round(flour_total_g, 1),
@@ -333,7 +349,8 @@ def compute_recipe(
     }
 
     return {
-        "flours": flours_out,
+        "ingredients": {"flours": flours_out},
+        "pre_ferments": pre_ferments_out,
         "technique": technique,
         "hydration_pct": hydration,
         "salt_pct": salt,
@@ -374,7 +391,9 @@ def scale_recipe(recipe: dict[str, Any], num_balls: int) -> dict[str, Any]:
     scaled = dict(recipe)
     scaled["num_balls"] = num_balls
     scaled["total_dough_g"] = round(recipe["ball_weight_g"] * num_balls, 1)
-    scaled["flours"] = [{**f, "grams": round(f["grams"] * num_balls, 1)} for f in recipe["flours"]]
+    scaled["ingredients"] = {
+        "flours": [{**f, "grams": round(f["grams"] * num_balls, 1)} for f in recipe["ingredients"]["flours"]]
+    }
     scaled["leavening"] = {
         k: (round(v * num_balls, 2) if k in _LEAVENING_GRAM_KEYS else v)
         for k, v in recipe["leavening"].items()
