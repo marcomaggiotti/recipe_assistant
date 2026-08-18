@@ -1,10 +1,10 @@
 # Pizza Service (AI Agent)
 
 FastAPI microservice that turns a **flour blend** (baker's percentages) and an optional
-**pre-ferment** (one or more named components, e.g. biga 60% / poolish 40%) into a
-scaled pizza dough recipe: ingredient weights, a preferment breakdown where relevant,
-and a fermentation schedule. Also exposes a built-in AI agent endpoint (`/agent/chat`)
-that can do the same from a natural-language instruction via Anthropic tool-calling.
+**pre-ferment** (a reusable named blend, e.g. biga 60% / poolish 40%) into a scaled
+pizza dough recipe: ingredient weights, a preferment breakdown where relevant, and a
+fermentation schedule. Also exposes a built-in AI agent endpoint (`/agent/chat`) that
+can do the same from a natural-language instruction via Anthropic tool-calling.
 
 Extracted from the [`ict_project`](https://github.com/marcomaggiotti/ict_project) monorepo
 as a standalone, self-contained service (own dependencies, Dockerfile, config).
@@ -20,10 +20,10 @@ as a standalone, self-contained service (own dependencies, Dockerfile, config).
 | GET    | `/recipes`        | List saved recipes (`limit`, `offset`)                        |
 | GET    | `/recipes/{id}`   | Get one saved recipe (`?num_balls=N`, default 1)               |
 | DELETE | `/recipes/{id}`   | Delete a saved recipe                                          |
-| POST   | `/pre-ferment-types` | Save a reusable named pre-ferment blend (**Postgres-only**) |
-| GET    | `/pre-ferment-types` | List saved pre-ferment blends (**Postgres-only**) |
-| GET    | `/pre-ferment-types/{id}` | Get one saved pre-ferment blend (**Postgres-only**) |
-| DELETE | `/pre-ferment-types/{id}` | Delete a saved pre-ferment blend (**Postgres-only**) |
+| POST   | `/pre-ferment-types` | Save a reusable named pre-ferment blend (Postgres-preferred, sqlite fallback) |
+| GET    | `/pre-ferment-types` | List saved pre-ferment blends (Postgres-preferred, sqlite fallback) |
+| GET    | `/pre-ferment-types/{id}` | Get one saved pre-ferment blend (Postgres-preferred, sqlite fallback) |
+| DELETE | `/pre-ferment-types/{id}` | Delete a saved pre-ferment blend (Postgres-preferred, sqlite fallback) |
 | POST   | `/agent/chat`     | Natural-language agent chat over recipe generation/storage    |
 | GET    | `/`               | Browser page - home/nav menu |
 | GET    | `/flour-explorer` | Browser page - filterable thumbnail grid over the flour catalogue |
@@ -51,9 +51,10 @@ Four small, dependency-free HTML/JS pages (no frontend build step, shared stylin
   what's already linked. Warns if flour-service is currently running with an in-memory
   backend (added products would be lost on its next restart).
 - **`/new-recipe`** - build a dough formula (flour blend rows populated from
-  flour-service, an optional pre-ferment with one or more named components, optional
-  hydration/salt/oil/yeast overrides) and save it via this service's own `POST /recipes`;
-  shows the computed result and a list of recently saved recipes. Deliberately not at
+  flour-service, an optional pre-ferment referencing a saved blend - with a way to save
+  a new named blend, e.g. biga 60% / poolish 40%, inline - optional hydration/salt/oil/
+  yeast overrides) and save it via this service's own `POST /recipes`; shows the
+  computed result and a list of recently saved recipes. Deliberately not at
   `/recipes/new` - that would collide with `GET /recipes/{item_id}`.
 
 All of them call `flour-service` directly from client-side JS: set `FLOUR_SERVICE_URL`
@@ -77,10 +78,7 @@ separate, query-time concern (`?num_balls=N` on `/recipes/generate` and
     ]
   },
   "pre_ferment": {
-    "components": [
-      {"name": "biga", "percentage": 60},
-      {"name": "poolish", "percentage": 40}
-    ],
+    "type_id": "biga60_poolish40",
     "percentage": 35
   },
   "hydration_pct": 75,
@@ -100,18 +98,14 @@ separate, query-time concern (`?num_balls=N` on `/recipes/generate` and
   `description` is an optional free-text note for the specific brand/product used (e.g.
   `"Semola Caputo"`) - purely informational, not matched against the catalogue.
 - `pre_ferment` - optional; omit entirely for a plain commercial-yeast dough. When set,
-  it builds ONE aggregate preferment - named components are descriptive/echoed metadata
-  only, never computed separately (so "biga 60% / poolish 40%" produces a single
-  preferment mass, not two separately-computed ones). Either:
-  - `components` - inline named components, e.g.
-    `[{"name": "biga", "percentage": 60}, {"name": "poolish", "percentage": 40}]`
-    (percentages must sum to 100), **or**
-  - `type_id` - references a reusable blend saved via `POST /pre-ferment-types` (see
-    below) instead of describing components inline.
-
-  Set exactly one of `components`/`type_id`. `percentage` is the preferment's baker's %
-  of total flour weight (grams of preferment flour per 100g of total flour, e.g. the
-  baguette formula's "Poolish 400g / 40%"); defaults to 40 when omitted.
+  it builds ONE aggregate preferment from a reusable blend - named components (e.g.
+  "biga 60% / poolish 40%") are descriptive/echoed metadata only, never computed
+  separately (a single preferment mass, not two separately-computed ones):
+  - `type_id` - references a blend saved via `POST /pre-ferment-types` (see below), e.g.
+    `"biga60_poolish40"`. Required.
+  - `percentage` - the preferment's baker's % of total flour weight (grams of preferment
+    flour per 100g of total flour, e.g. the baguette formula's "Poolish 400g / 40%");
+    defaults to 40 when omitted.
 - Any of `hydration_pct`, `salt_pct`, `oil_pct`, `yeast_pct`, `ball_weight_g` left unset
   falls back to a generic baker's-percentage default (62% hydration, 2.5% salt, 0% oil,
   250g ball weight).
@@ -125,22 +119,26 @@ of `num_balls`, **not** to be confused with `ingredients.flours` - different thi
 happen to share a name prefix), `ingredients_total` (the full batch), and a step-by-step
 fermentation schedule.
 
-### Pre-ferment types (Postgres-only)
+### Pre-ferment types (Postgres-preferred, sqlite fallback)
 
 `pre_ferment_types` is a small reference table of reusable named blends a recipe's
-`pre_ferment.type_id` can point at instead of describing `components` inline - e.g. save
-`biga80_sourdough20` once, then reuse it across recipes. It's **only available when
-`DB_BACKEND=postgres`**; the other endpoints (`/recipes/*`) work on any backend
-regardless. On sqlite/cosmos, `/pre-ferment-types` requests return `400` explaining that
-Postgres is required.
+`pre_ferment.type_id` points at - e.g. save `biga80_sourdough20` once (biga 80% /
+sourdough 20%), then reuse it across recipes. It connects via `POSTGRES_URL`,
+**independent of `DB_BACKEND`** - so a deployment can run `/recipes/*` on sqlite or
+Cosmos and still use `/pre-ferment-types`, just by pointing `POSTGRES_URL` at a real
+Postgres database (this is how the Render blueprint is set up - see below). If Postgres
+isn't reachable, it falls back to a table in the local sqlite file (`SQLITE_PATH`)
+instead of erroring - so the feature keeps working (e.g. local dev with no Postgres
+running at all). That choice is made once per running process, the first time
+`/pre-ferment-types` is actually used, not at startup.
 
 ```json
 // POST /pre-ferment-types
-{"id": "biga80_sourdough20", "preferments": [{"name": "biga", "percentage": 80}, {"name": "sourdough", "percentage": 20}]}
+{"type_id": "biga80_sourdough20", "preferments": [{"name": "biga", "percentage": 80}, {"name": "sourdough", "percentage": 20}]}
 ```
 
-A row is deliberately just `id` + `preferments` (name/percentage pairs) - no technique,
-hydration, or resting-hours columns; those stay recipe-level concerns.
+A row is deliberately just `type_id` + `preferments` (name/percentage pairs) - no
+technique, hydration, or resting-hours columns; those stay recipe-level concerns.
 
 ### International flour catalogue
 
@@ -187,16 +185,21 @@ without needing a request to hit a specific endpoint first.
 
 ## Configuration
 
-Copy `.env.example` to `.env` and adjust. Key setting: `DB_BACKEND`:
+Copy `.env.example` to `.env` and adjust. Key setting: `DB_BACKEND` (controls
+`/recipes/*` and `/recipes/flours` storage):
 
 - `sqlite` (default) - zero-config local file DB, good for quick local runs.
 - `postgres` - any Postgres-wire-compatible database, including a **Render**
   [managed Postgres](https://render.com/pricing#postgresql) instance - just set
-  `POSTGRES_URL` to Render's external connection string. Required for
-  `/pre-ferment-types` (see above) - that table is Postgres-only, unlike everything else.
+  `POSTGRES_URL` to Render's external connection string.
 - `cosmos` - **Azure Cosmos DB** (NoSQL API) - set `COSMOS_ENDPOINT` and `COSMOS_KEY`
   from an existing Cosmos account; `COSMOS_DATABASE`/`COSMOS_CONTAINER` are
   auto-created if missing.
+
+`POSTGRES_URL` is separate from `DB_BACKEND` and always in effect: `/pre-ferment-types`
+(see above) prefers it regardless of which `DB_BACKEND` the rest of the service uses,
+falling back to `SQLITE_PATH` if it's unreachable - set `POSTGRES_URL` to a real
+Postgres instance to use that endpoint even when `DB_BACKEND=sqlite`/`cosmos`.
 
 `ANTHROPIC_API_KEY` enables `/agent/chat`; without it the endpoint returns a message
 saying the key is missing instead of erroring.
@@ -221,8 +224,13 @@ docker compose --profile postgres up --build
 
 This folder ships a `render.yaml` [Blueprint](https://render.com/docs/blueprint-spec) that
 deploys the web service (built from the included `Dockerfile`) against **Azure Cosmos
-DB**. Render doesn't host Cosmos DB itself (it's an Azure service), so you provision the
-Cosmos account in Azure first and just point the Render service at it.
+DB** for `/recipes/*` (`DB_BACKEND=cosmos`), plus a small **Render-managed Postgres**
+database used only for `/pre-ferment-types` - Render provisions that Postgres database
+directly from the blueprint (no external account needed), wired up via its own
+`POSTGRES_URL` independent of `DB_BACKEND` (see "Configuration" above). Cosmos DB
+itself is NOT provisioned by this blueprint (Render doesn't host Cosmos - it's an Azure
+service), so you provision the Cosmos account in Azure first and just point the Render
+service at it.
 
 ### 1. Create the Cosmos DB account (Azure Portal)
 
@@ -242,8 +250,9 @@ Cosmos account in Azure first and just point the Render service at it.
 
 1. Push this repo to GitHub (already the case if you're reading this in the repo).
 2. In the Render dashboard: **New -> Blueprint**, and point it at this repo. It reads
-   `render.yaml` and creates the `pizza-service` web service with `DB_BACKEND=cosmos`
-   pre-set.
+   `render.yaml` and creates the `pizza-service` web service plus a small
+   `pre-ferment-types-db` Postgres database, wiring `DB_BACKEND=cosmos` and
+   `POSTGRES_URL` (from that database's connection string) automatically.
 3. After the first deploy, open the service's **Environment** tab and set the values
    left blank in the blueprint on purpose (they're secrets):
    - `COSMOS_ENDPOINT`, `COSMOS_KEY` - from step 1
@@ -253,13 +262,15 @@ Cosmos account in Azure first and just point the Render service at it.
    `https://<service-name>.onrender.com` once that passes and redeploys after you save
    the env vars.
 
-Prefer Render's own managed Postgres instead of Cosmos? Switch `DB_BACKEND` back to
-`postgres` and see the commented-out block at the bottom of `render.yaml` for the
-`databases:` section to add back.
+Prefer running the WHOLE service on Render's managed Postgres instead of Cosmos? Switch
+`DB_BACKEND` to `postgres` and drop the `COSMOS_*` env vars - `POSTGRES_URL` and the
+`databases:` block can stay as-is, since `/recipes/*` and `/pre-ferment-types` would
+then share the same database.
 
 You can also skip the blueprint and create the web service manually (Docker runtime)
-and point `DB_BACKEND=sqlite` at it for a no-database quick deploy - recipes just
-won't survive a redeploy/restart in that mode.
+and point `DB_BACKEND=sqlite` at it for a no-database quick deploy - recipes just won't
+survive a redeploy/restart in that mode. `/pre-ferment-types` prefers `POSTGRES_URL` if
+set to a reachable instance, otherwise falls back to that same ephemeral sqlite file.
 
 ## Tests
 

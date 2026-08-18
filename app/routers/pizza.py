@@ -30,22 +30,18 @@ def get_flour_catalog_store():
 
 
 def _resolve_pre_ferment(pre_ferment: PreFerment | None) -> dict | None:
-    """Turns a request's PreFerment (inline components, or a type_id reference into
-    the Postgres pre_ferment_types table) into the resolved {"components": [...],
-    "percentage": ...} shape compute_recipe() expects."""
+    """Turns a request's PreFerment (a type_id reference into the Postgres
+    pre_ferment_types table) into the resolved {"components": [...], "percentage": ...}
+    shape compute_recipe() expects."""
     if pre_ferment is None:
         return None
-    if pre_ferment.type_id is not None:
-        try:
-            saved = get_pre_ferment_type_store().get(pre_ferment.type_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from None
-        if saved is None:
-            raise HTTPException(status_code=400, detail=f"unknown pre_ferment type_id '{pre_ferment.type_id}'")
-        components = saved["preferments"]
-    else:
-        components = [c.model_dump() for c in pre_ferment.components]
-    return {"components": components, "percentage": pre_ferment.percentage}
+    try:
+        saved = get_pre_ferment_type_store().get(pre_ferment.type_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    if saved is None:
+        raise HTTPException(status_code=400, detail=f"unknown pre_ferment type_id '{pre_ferment.type_id}'")
+    return {"components": saved["preferments"], "percentage": pre_ferment.percentage}
 
 
 def compute_recipe(request: RecipeGenerateRequest) -> dict:

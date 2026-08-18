@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FlourComponent(BaseModel):
@@ -42,38 +42,21 @@ class PreFermentComponent(BaseModel):
 
 
 class PreFerment(BaseModel):
-    """A recipe's preferment - either described inline as one or more named components
-    (e.g. biga 60% / poolish 40%), or by referencing a reusable blend from
-    GET /pre-ferment-types via `type_id`. Either way, the engine computes ONE aggregate
-    preferment formula; named components are descriptive/echoed metadata only, never
-    computed separately."""
+    """A recipe's preferment - references a reusable blend (one or more named
+    components, e.g. biga 60% / poolish 40%) saved via POST /pre-ferment-types. The
+    engine computes ONE aggregate preferment formula from the referenced blend; its
+    named components are descriptive/echoed metadata only, never computed separately."""
 
-    type_id: str | None = Field(
-        default=None,
-        description="References a saved blend from GET /pre-ferment-types instead of "
-                    "describing components inline. Set this or `components`, not both.",
-    )
-    components: list[PreFermentComponent] | None = Field(
-        default=None,
-        description="Inline named components, e.g. [{'name': 'biga', 'percentage': 60}, "
-                    "{'name': 'poolish', 'percentage': 40}]. Percentages must sum to 100. "
-                    "Set this or `type_id`, not both.",
+    type_id: str = Field(
+        min_length=1,
+        description="References a saved blend from GET /pre-ferment-types, e.g. 'biga100' "
+                    "or 'biga60_poolish40'.",
     )
     percentage: float = Field(
         default=40.0, ge=0, le=100,
         description="Baker's % of total flour built into the preferment (grams of preferment "
                     "flour per 100g of total flour). Defaults to 40.",
     )
-
-    @model_validator(mode="after")
-    def _validate_components(self) -> "PreFerment":
-        if bool(self.type_id) == bool(self.components):
-            raise ValueError("set exactly one of pre_ferment.type_id or pre_ferment.components")
-        if self.components is not None:
-            total = sum(c.percentage for c in self.components)
-            if abs(total - 100.0) > 0.5:
-                raise ValueError(f"pre_ferment.components percentages must sum to 100 (got {total:.1f})")
-        return self
 
 
 class RecipeGenerateRequest(BaseModel):
@@ -85,8 +68,8 @@ class RecipeGenerateRequest(BaseModel):
     ingredients: Ingredients
     pre_ferment: PreFerment | None = Field(
         default=None,
-        description="Omit for a plain commercial-yeast dough. Set to build a preferment - "
-                    "either inline named components or a type_id reference (see PreFerment).",
+        description="Omit for a plain commercial-yeast dough. Set to build a preferment "
+                    "from a saved blend (see PreFerment.type_id).",
     )
     hydration_pct: float | None = Field(default=None, ge=0, le=100)
     salt_pct: float | None = Field(default=None, ge=0)
