@@ -1,14 +1,14 @@
 """Named pre-ferment "type" definitions: reusable blends a recipe's pre_ferment can
-reference by id instead of describing inline, e.g.:
+reference by type_id instead of describing inline, e.g.:
 
     biga100             -> [{"name": "biga", "percentage": 100}]
     biga80_sourdough20  -> [{"name": "biga", "percentage": 80}, {"name": "sourdough", "percentage": 20}]
 
-A recipe references one via `pre_ferment.type_id` (see schemas.py's PreFerment), as an
-alternative to describing `pre_ferment.components` inline. Either way, recipe.py's
-dough engine always computes ONE aggregate preferment formula - named components are
-descriptive/echoed metadata only, never computed separately. A row deliberately carries
-no technique/hydration/resting-hours columns - just the id and its preferments breakdown.
+A recipe references one via `pre_ferment.type_id` (see schemas.py's PreFerment).
+recipe.py's dough engine always computes ONE aggregate preferment formula from the
+referenced blend - named components are descriptive/echoed metadata only, never
+computed separately. A row deliberately carries no technique/hydration/resting-hours
+columns - just the type_id and its preferments breakdown.
 
 Postgres-only, unlike flours.py's in-memory-by-default pattern - there's no
 seed data for this table (it's populated by callers via POST /pre-ferment-types), and
@@ -48,36 +48,36 @@ class PostgresPreFermentTypeStore(PreFermentTypeStore):
         with self._engine.begin() as conn:
             conn.execute(text(
                 """CREATE TABLE IF NOT EXISTS pre_ferment_types (
-                    id TEXT PRIMARY KEY,
+                    type_id TEXT PRIMARY KEY,
                     preferments JSONB NOT NULL
                 )"""
             ))
 
     def create(self, type_id, preferments):
-        record = {"id": type_id, "preferments": preferments}
+        record = {"type_id": type_id, "preferments": preferments}
         with self._engine.begin() as conn:
             conn.execute(self._text(
-                "INSERT INTO pre_ferment_types (id, preferments) VALUES (:id, :preferments)"
-            ), {"id": type_id, "preferments": json.dumps(preferments)})
+                "INSERT INTO pre_ferment_types (type_id, preferments) VALUES (:type_id, :preferments)"
+            ), {"type_id": type_id, "preferments": json.dumps(preferments)})
         return record
 
     def get(self, type_id):
         with self._engine.begin() as conn:
             row = conn.execute(self._text(
-                "SELECT id, preferments FROM pre_ferment_types WHERE id = :id"
-            ), {"id": type_id}).fetchone()
+                "SELECT type_id, preferments FROM pre_ferment_types WHERE type_id = :type_id"
+            ), {"type_id": type_id}).fetchone()
         if not row:
             return None
-        return {"id": row[0], "preferments": row[1] if isinstance(row[1], list) else json.loads(row[1])}
+        return {"type_id": row[0], "preferments": row[1] if isinstance(row[1], list) else json.loads(row[1])}
 
     def list(self):
         with self._engine.begin() as conn:
-            rows = conn.execute(self._text("SELECT id, preferments FROM pre_ferment_types ORDER BY id")).fetchall()
-        return [{"id": r[0], "preferments": r[1] if isinstance(r[1], list) else json.loads(r[1])} for r in rows]
+            rows = conn.execute(self._text("SELECT type_id, preferments FROM pre_ferment_types ORDER BY type_id")).fetchall()
+        return [{"type_id": r[0], "preferments": r[1] if isinstance(r[1], list) else json.loads(r[1])} for r in rows]
 
     def delete(self, type_id):
         with self._engine.begin() as conn:
-            result = conn.execute(self._text("DELETE FROM pre_ferment_types WHERE id = :id"), {"id": type_id})
+            result = conn.execute(self._text("DELETE FROM pre_ferment_types WHERE type_id = :type_id"), {"type_id": type_id})
         return result.rowcount > 0
 
 

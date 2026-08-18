@@ -228,8 +228,8 @@
       els.prefermentType.innerHTML = "";
       for (const item of data.items) {
         const opt = document.createElement("option");
-        opt.value = item.id;
-        opt.textContent = item.id + " (" + item.preferments.map((p) => p.name + " " + p.percentage + "%").join(" / ") + ")";
+        opt.value = item.type_id;
+        opt.textContent = item.type_id + " (" + item.preferments.map((p) => p.name + " " + p.percentage + "%").join(" / ") + ")";
         els.prefermentType.appendChild(opt);
       }
       if (selectId) els.prefermentType.value = selectId;
@@ -243,21 +243,21 @@
   });
 
   els.saveBlendBtn.addEventListener("click", async () => {
-    const id = els.newBlendId.value.trim();
+    const type_id = els.newBlendId.value.trim();
     const rows = Array.from(els.prefermentRows.querySelectorAll(".blend-row"));
     const preferments = rows.map((row) => {
       const [nameField, percentField] = row.querySelectorAll("input");
       return { name: nameField.value.trim(), percentage: parseFloat(percentField.value) };
     });
-    if (!id) {
+    if (!type_id) {
       setStatus(els.blendStatus, "Blend id is required.", "error");
       return;
     }
     setStatus(els.blendStatus, "Saving blend…");
     try {
-      await ownFetch("/pre-ferment-types", { method: "POST", body: JSON.stringify({ id, preferments }) });
+      await ownFetch("/pre-ferment-types", { method: "POST", body: JSON.stringify({ type_id, preferments }) });
       setStatus(els.blendStatus, "Blend saved.", "ok");
-      await loadPreFermentTypes(id);
+      await loadPreFermentTypes(type_id);
     } catch (e) {
       setStatus(els.blendStatus, "Couldn't save blend: " + e.message, "error");
     }

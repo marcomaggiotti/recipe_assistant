@@ -19,7 +19,7 @@ def get_pre_ferment_type_store():
 
 
 class PreFermentTypeCreate(BaseModel):
-    id: str = Field(
+    type_id: str = Field(
         min_length=1,
         description="Stable slug referenced by a recipe's pre_ferment.type_id, e.g. 'biga100' or "
                     "'biga80_sourdough20'.",
@@ -42,9 +42,9 @@ def _handle_unsupported_backend(exc: ValueError):
 def create_pre_ferment_type(body: PreFermentTypeCreate):
     store = get_pre_ferment_type_store()
     try:
-        if store.get(body.id) is not None:
-            raise HTTPException(status_code=400, detail=f"pre_ferment type '{body.id}' already exists")
-        return store.create(body.id, [p.model_dump() for p in body.preferments])
+        if store.get(body.type_id) is not None:
+            raise HTTPException(status_code=400, detail=f"pre_ferment type '{body.type_id}' already exists")
+        return store.create(body.type_id, [p.model_dump() for p in body.preferments])
     except ValueError as exc:
         _handle_unsupported_backend(exc)
 

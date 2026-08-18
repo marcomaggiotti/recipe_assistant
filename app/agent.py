@@ -105,7 +105,7 @@ TOOLS = [
     },
     {
         "name": "list_pre_ferment_types",
-        "description": "List the saved pre-ferment type blends (id + named components) a recipe's pre_ferment.type_id can reference.",
+        "description": "List the saved pre-ferment type blends (type_id + named components) a recipe's pre_ferment.type_id can reference.",
         "input_schema": {"type": "object", "properties": {}},
     },
     {

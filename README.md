@@ -122,19 +122,19 @@ fermentation schedule.
 ### Pre-ferment types (Postgres-only)
 
 `pre_ferment_types` is a small reference table of reusable named blends a recipe's
-`pre_ferment.type_id` can point at instead of describing `components` inline - e.g. save
-`biga80_sourdough20` once, then reuse it across recipes. It's **only available when
+`pre_ferment.type_id` points at - e.g. save `biga80_sourdough20` once (biga 80% /
+sourdough 20%), then reuse it across recipes. It's **only available when
 `DB_BACKEND=postgres`**; the other endpoints (`/recipes/*`) work on any backend
 regardless. On sqlite/cosmos, `/pre-ferment-types` requests return `400` explaining that
 Postgres is required.
 
 ```json
 // POST /pre-ferment-types
-{"id": "biga80_sourdough20", "preferments": [{"name": "biga", "percentage": 80}, {"name": "sourdough", "percentage": 20}]}
+{"type_id": "biga80_sourdough20", "preferments": [{"name": "biga", "percentage": 80}, {"name": "sourdough", "percentage": 20}]}
 ```
 
-A row is deliberately just `id` + `preferments` (name/percentage pairs) - no technique,
-hydration, or resting-hours columns; those stay recipe-level concerns.
+A row is deliberately just `type_id` + `preferments` (name/percentage pairs) - no
+technique, hydration, or resting-hours columns; those stay recipe-level concerns.
 
 ### International flour catalogue
 

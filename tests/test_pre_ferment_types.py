@@ -53,12 +53,12 @@ def test_postgres_store_create_get_list_delete_roundtrip():
     type_id = f"test_{uuid.uuid4().hex[:8]}"
     try:
         created = store.create(type_id, [{"name": "biga", "percentage": 100}])
-        assert created == {"id": type_id, "preferments": [{"name": "biga", "percentage": 100}]}
+        assert created == {"type_id": type_id, "preferments": [{"name": "biga", "percentage": 100}]}
 
         fetched = store.get(type_id)
         assert fetched == created
 
-        assert any(item["id"] == type_id for item in store.list())
+        assert any(item["type_id"] == type_id for item in store.list())
     finally:
         assert store.delete(type_id) is True
     assert store.get(type_id) is None
@@ -71,7 +71,7 @@ def test_api_create_and_get_pre_ferment_type():
     try:
         create = client.post(
             "/pre-ferment-types",
-            json={"id": type_id, "preferments": [{"name": "biga", "percentage": 80}, {"name": "sourdough", "percentage": 20}]},
+            json={"type_id": type_id, "preferments": [{"name": "biga", "percentage": 80}, {"name": "sourdough", "percentage": 20}]},
         )
         assert create.status_code == 201
 
@@ -80,7 +80,7 @@ def test_api_create_and_get_pre_ferment_type():
         assert get.json()["preferments"] == [{"name": "biga", "percentage": 80}, {"name": "sourdough", "percentage": 20}]
 
         listing = client.get("/pre-ferment-types")
-        assert any(item["id"] == type_id for item in listing.json()["items"])
+        assert any(item["type_id"] == type_id for item in listing.json()["items"])
     finally:
         client.delete(f"/pre-ferment-types/{type_id}")
 
@@ -90,7 +90,7 @@ def test_api_create_and_get_pre_ferment_type():
 def test_api_rejects_percentages_not_summing_to_100():
     response = client.post(
         "/pre-ferment-types",
-        json={"id": f"test_{uuid.uuid4().hex[:8]}", "preferments": [{"name": "biga", "percentage": 60}]},
+        json={"type_id": f"test_{uuid.uuid4().hex[:8]}", "preferments": [{"name": "biga", "percentage": 60}]},
     )
     assert response.status_code == 422
 
@@ -100,9 +100,9 @@ def test_api_rejects_percentages_not_summing_to_100():
 def test_api_rejects_duplicate_id():
     type_id = f"test_{uuid.uuid4().hex[:8]}"
     try:
-        first = client.post("/pre-ferment-types", json={"id": type_id, "preferments": [{"name": "poolish", "percentage": 100}]})
+        first = client.post("/pre-ferment-types", json={"type_id": type_id, "preferments": [{"name": "poolish", "percentage": 100}]})
         assert first.status_code == 201
-        second = client.post("/pre-ferment-types", json={"id": type_id, "preferments": [{"name": "biga", "percentage": 100}]})
+        second = client.post("/pre-ferment-types", json={"type_id": type_id, "preferments": [{"name": "biga", "percentage": 100}]})
         assert second.status_code == 400
     finally:
         client.delete(f"/pre-ferment-types/{type_id}")
@@ -122,7 +122,7 @@ def test_recipe_generate_resolves_pre_ferment_by_type_id():
     try:
         client.post(
             "/pre-ferment-types",
-            json={"id": type_id, "preferments": [{"name": "biga", "percentage": 60}, {"name": "poolish", "percentage": 40}]},
+            json={"type_id": type_id, "preferments": [{"name": "biga", "percentage": 60}, {"name": "poolish", "percentage": 40}]},
         )
         response = client.post(
             "/recipes/generate",
