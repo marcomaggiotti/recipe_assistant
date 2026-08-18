@@ -1,4 +1,7 @@
-# Compose file for running/developing this service locally.
+# Compose file for running/developing this repo's services locally. pizza-service and
+# topping-service are built from the SAME image (this repo's single Dockerfile) - which
+# app actually runs is picked at container startup via the SERVICE env var (see
+# docker-entrypoint.sh).
 services:
   pizza-service:
     build: .
@@ -7,7 +10,18 @@ services:
     env_file:
       - .env
     environment:
+      SERVICE: pizza-service
       DB_BACKEND: ${DB_BACKEND:-sqlite}
+
+  topping-service:
+    build: .
+    ports:
+      - "8001:8000"
+    env_file:
+      - .env
+    environment:
+      SERVICE: topping-service
+      TOPPING_DB_BACKEND: ${TOPPING_DB_BACKEND:-sqlite}
 
   postgres:
     image: postgres:16-alpine
