@@ -12,7 +12,6 @@ def health():
     if settings.db_backend == "cosmos":
         payload["cosmos_database"] = settings.cosmos_database
         payload["cosmos_container"] = settings.cosmos_container
-        payload["cosmos_styles_container"] = settings.cosmos_styles_container
         payload["cosmos_endpoint_configured"] = bool(settings.cosmos_endpoint)
         payload["cosmos_key_configured"] = bool(settings.cosmos_key)
     return payload

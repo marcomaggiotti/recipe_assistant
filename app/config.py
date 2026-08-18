@@ -21,7 +21,6 @@ class Settings(BaseSettings):
     cosmos_key: str = ""
     cosmos_database: str = "ai-agent"
     cosmos_container: str = "pizza_recipes"
-    cosmos_flours_container: str = "pizza_flours"
 
     # sqlite fallback for zero-config local dev
     sqlite_path: str = "./pizza_service.db"
@@ -32,9 +31,13 @@ class Settings(BaseSettings):
     cors_allow_origins: str = "*"
 
     # Standalone flour-catalogue microservice (github.com/marcomaggiotti/flour_service)
-    # - the /flour-explorer page's JS calls this directly from the browser, no backend
-    # proxying involved. Override for local dev (e.g. http://localhost:8001).
+    # - the /flour-explorer page's JS calls this directly from the browser, and
+    # app/flours.py's HttpFlourCatalogStore calls it server-side too (for
+    # /recipes/generate's flour validation) - there's no local flour catalogue copy in
+    # this repo. Override flour_service_url for local dev (e.g. http://localhost:8001).
+    # flour_service_api_key is only needed if that deployment has its own API_KEY set.
     flour_service_url: str = "https://flour-service.onrender.com"
+    flour_service_api_key: str = ""
 
 
 @lru_cache
