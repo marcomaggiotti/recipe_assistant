@@ -1,15 +1,18 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .recipe import TECHNIQUES
+from .recipe import PREFERMENT_TECHNIQUES, TECHNIQUES
 
 Technique = Literal[
     "direct", "same_day", "poolish", "biga", "sourdough",
     "cold_ferment_24h", "cold_ferment_48h", "cold_ferment_72h",
 ]
 assert list(Technique.__args__) == TECHNIQUES  # keep schema and engine in sync
+
+PreFermentType = Literal["poolish", "biga", "sourdough"]
+assert list(PreFermentType.__args__) == list(PREFERMENT_TECHNIQUES)  # keep schema and engine in sync
 
 
 class FlourComponent(BaseModel):
@@ -38,38 +41,59 @@ class FlourComponent(BaseModel):
     percent: float = Field(gt=0, description="Baker's % of this flour relative to the total flour blend")
 
 
+class Ingredients(BaseModel):
+    flours: list[FlourComponent] = Field(min_length=1)
+
+
+class PreFerment(BaseModel):
+    type: PreFermentType
+    percentage: float = Field(
+        ge=0, le=100,
+        description="Baker's % of the preferment/starter relative to total flour weight (grams of "
+                    "preferment flour, or starter, per 100g of total flour). Defaults to 40 for "
+                    "poolish/biga, 20 for sourdough, when this entry is omitted entirely.",
+    )
+
+
 class RecipeGenerateRequest(BaseModel):
     """Describes the dough formula for a single ball - how many balls you want is a
     separate, query-time concern (see the `num_balls` query param on the /recipes
     endpoints), not part of the saved formula."""
 
     name: str | None = None
-    flours: list[FlourComponent] = Field(min_length=1)
-    technique: Technique
+    ingredients: Ingredients
+    pre_ferments: list[PreFerment] = Field(
+        default_factory=list, max_length=1,
+        description="At most one, for now - only one preferment technique can be active per "
+                    "recipe. Its `type` becomes the recipe's technique unless `technique` is also "
+                    "given explicitly, in which case they must match. Omit entirely for "
+                    "direct/same_day/cold_ferment_* techniques (no separate preferment).",
+    )
+    technique: Technique | None = Field(
+        default=None,
+        description="Optional when pre_ferments has an entry (inferred from its type); otherwise "
+                    "defaults to 'direct'. Required only to select a non-preferment technique "
+                    "(same_day, cold_ferment_24h/48h/72h) or 'direct' explicitly.",
+    )
     style: str = "custom"
     hydration_pct: float | None = Field(default=None, ge=0, le=100)
     salt_pct: float | None = Field(default=None, ge=0)
     oil_pct: float | None = Field(default=None, ge=0)
     yeast_pct: float | None = Field(default=None, ge=0)
     ball_weight_g: float | None = Field(default=None, gt=0)
-    poolish_percentage: float | None = Field(
-        default=None, ge=0, le=100,
-        description="Baker's % of the poolish preferment relative to total flour weight "
-                    "(grams of preferment flour per 100g of total flour). Only applies when "
-                    "technique='poolish'; defaults to 40 when unset.",
-    )
-    biga_percentage: float | None = Field(
-        default=None, ge=0, le=100,
-        description="Baker's % of the biga preferment relative to total flour weight "
-                    "(grams of preferment flour per 100g of total flour). Only applies when "
-                    "technique='biga'; defaults to 40 when unset.",
-    )
-    sourdough_percentage: float | None = Field(
-        default=None, ge=0, le=100,
-        description="Baker's % of the mature sourdough starter relative to total flour weight "
-                    "(grams of starter per 100g of total flour). Only applies when "
-                    "technique='sourdough'; defaults to 20 when unset.",
-    )
+
+    @model_validator(mode="after")
+    def _resolve_technique(self) -> "RecipeGenerateRequest":
+        if self.pre_ferments:
+            inferred = self.pre_ferments[0].type
+            if self.technique is not None and self.technique != inferred:
+                raise ValueError(
+                    f"technique '{self.technique}' does not match pre_ferments[0].type '{inferred}'"
+                )
+            self.technique = inferred
+        elif self.technique is None:
+            self.technique = "direct"
+        return self
 
 
 class StyleAttribution(BaseModel):
@@ -82,11 +106,16 @@ class StyleAttribution(BaseModel):
 
 class GeneratedRecipe(BaseModel):
     """A single-ball formula (ball_weight_g), scaled to num_balls balls (default 1,
-    set via the `num_balls` query param) - flours[].grams, leavening's gram fields,
-    and ingredients_total reflect the full num_balls batch; ingredients_per_ball is
-    the constant per-ball reference regardless of num_balls."""
+    set via the `num_balls` query param) - ingredients.flours[].grams, leavening's gram
+    fields, and ingredients_total reflect the full num_balls batch; ingredients_per_ball
+    is the constant per-ball reference regardless of num_balls.
 
-    flours: list[dict]
+    Note ingredients (the flour blend, {"flours": [...]}) and ingredients_per_ball/
+    ingredients_total (computed flour/water/salt/oil weights) are different things
+    that happen to share a name prefix - not a typo."""
+
+    ingredients: dict
+    pre_ferments: list[dict]
     technique: str
     hydration_pct: float
     salt_pct: float

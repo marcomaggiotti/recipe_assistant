@@ -83,11 +83,6 @@
 <script>
 (function () {
   const FLOUR_SERVICE_BASE = "__FLOUR_SERVICE_URL__";
-  const TECHNIQUE_LABELS = {
-    direct: "Direct", same_day: "Same day", poolish: "Poolish preferment", biga: "Biga preferment",
-    sourdough: "Sourdough", cold_ferment_24h: "Cold ferment 24h", cold_ferment_48h: "Cold ferment 48h",
-    cold_ferment_72h: "Cold ferment 72h",
-  };
   let styleDefaults = {};
   let blendRowCount = 0;
 
@@ -229,7 +224,7 @@
 
   function renderResult(recipe) {
     els.result.style.display = "block";
-    const flourLines = recipe.flours.map((f) => "<li>" + f.pizza_flours_id + " - " + f.percent + "% (" + f.grams + "g)</li>").join("");
+    const flourLines = recipe.ingredients.flours.map((f) => "<li>" + f.pizza_flours_id + " - " + f.percent + "% (" + f.grams + "g)</li>").join("");
     els.result.innerHTML =
       "<h2 style='margin-top:0;font-size:1.05rem;'>Saved: " + (recipe.name || recipe.style_attribution.label) + "</h2>" +
       "<p class='meta-line'>" + recipe.technique + " · " + recipe.style_attribution.label + "</p>" +
@@ -274,7 +269,7 @@
     setStatus(els.status, "Saving…");
     els.result.style.display = "none";
     const body = {
-      flours: collectFlours(),
+      ingredients: { flours: collectFlours() },
       technique: els.technique.value,
       style: els.style.value,
     };
@@ -289,12 +284,19 @@
     if (oil !== undefined) body.oil_pct = oil;
     const yeast = numOrUndefined(els.yeast);
     if (yeast !== undefined) body.yeast_pct = yeast;
-    const poolish = numOrUndefined(els.poolish);
-    if (poolish !== undefined) body.poolish_percentage = poolish;
-    const biga = numOrUndefined(els.biga);
-    if (biga !== undefined) body.biga_percentage = biga;
-    const sourdough = numOrUndefined(els.sourdough);
-    if (sourdough !== undefined) body.sourdough_percentage = sourdough;
+
+    // pre_ferments carries at most one entry - whichever percentage field matches the
+    // selected technique (poolish/biga/sourdough); ignored/absent for direct/same_day/
+    // cold_ferment_* since those don't build a separate preferment.
+    const preFermentPctByTechnique = {
+      poolish: numOrUndefined(els.poolish),
+      biga: numOrUndefined(els.biga),
+      sourdough: numOrUndefined(els.sourdough),
+    };
+    const activePct = preFermentPctByTechnique[els.technique.value];
+    if (activePct !== undefined) {
+      body.pre_ferments = [{ type: els.technique.value, percentage: activePct }];
+    }
 
     try {
       const recipe = await ownFetch("/recipes", { method: "POST", body: JSON.stringify(body) });

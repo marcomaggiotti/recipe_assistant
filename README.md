@@ -67,56 +67,64 @@ separate, query-time concern (`?num_balls=N` on `/recipes/generate` and
 
 ```json
 {
-  "name": "Friday pizza night",
-  "flours": [
-    {"pizza_flours_id": "soft_wheat_00", "ash%": 0.55, "description": "Semola Caputo", "percent": 80},
-    {"pizza_flours_id": "whole_wheat", "description": "Naturaplan Bio CH Weissmehl Coop", "percent": 20}
+  "name": "Country Sourdough",
+  "ingredients": {
+    "flours": [
+      {"pizza_flours_id": "soft_wheat_0", "ash%": 0.55, "description": "Strong white flour", "percent": 80},
+      {"pizza_flours_id": "whole_wheat", "ash%": 1.30, "description": "Whole wheat flour", "percent": 20}
+    ]
+  },
+  "pre_ferments": [
+    {"type": "sourdough", "percentage": 20}
   ],
-  "technique": "poolish",
-  "style": "ny_style",
-  "hydration_pct": 63,
-  "salt_pct": 2.5,
-  "oil_pct": 3,
-  "ball_weight_g": 280,
-  "poolish_percentage": 40
+  "hydration_pct": 75,
+  "salt_pct": 2,
+  "oil_pct": 0,
+  "ball_weight_g": 900
 }
 ```
 
-- `flours` - baker's percentages of the blend relative to each other; they don't need to
-  sum to exactly 100, they're normalized (with a warning) if not. Every `pizza_flours_id` must
-  match an entry in the flour catalogue (see below) - its `id` or one of its localized
-  names/codes; anything else is rejected with a 400. `ash%` is optional and only
-  meaningful for milled wheat flours (e.g. `0.55` for Italian Tipo 00, per DPR 187/2001) -
-  when set, it's cross-checked against the resolved flour's ash range and a mismatch is
-  returned as a (non-fatal) warning rather than rejected. `description` is an optional
-  free-text note for the specific brand/product used (e.g. `"Semola Caputo"`) - purely
-  informational, not matched against the catalogue.
-- `technique` - one of `direct`, `same_day`, `poolish`, `biga`, `sourdough`,
-  `cold_ferment_24h`, `cold_ferment_48h`, `cold_ferment_72h`. Drives the yeast/preferment
-  math and the generated fermentation schedule.
+- `ingredients.flours` - baker's percentages of the blend relative to each other; they
+  don't need to sum to exactly 100, they're normalized (with a warning) if not. Every
+  `pizza_flours_id` must match an entry in the flour catalogue (see below) - its `id` or
+  one of its localized names/codes; anything else is rejected with a 400. `ash%` is
+  optional and only meaningful for milled wheat flours (e.g. `0.55` for Italian Tipo 00,
+  per DPR 187/2001) - when set, it's cross-checked against the resolved flour's ash
+  range and a mismatch is returned as a (non-fatal) warning rather than rejected.
+  `description` is an optional free-text note for the specific brand/product used (e.g.
+  `"Semola Caputo"`) - purely informational, not matched against the catalogue.
+- `pre_ferments` - at most one entry, `{"type": "poolish"|"biga"|"sourdough", "percentage": ...}`.
+  `percentage` is the preferment/starter's baker's % of total flour weight (grams of
+  preferment flour, or starter, per 100g of total flour, e.g. the baguette formula's
+  "Poolish 400g / 40%"); defaults to 40 (poolish/biga) or 20 (sourdough) when this entry
+  is omitted entirely. Its `type` becomes the recipe's `technique` unless `technique` is
+  *also* given explicitly (in which case they must match). Omit `pre_ferments` entirely
+  for a plain `direct` dough or one of the other non-preferment techniques below.
+- `technique` - optional when `pre_ferments` has an entry (inferred from its `type`);
+  otherwise one of `direct`, `same_day`, `cold_ferment_24h`, `cold_ferment_48h`,
+  `cold_ferment_72h` (or `poolish`/`biga`/`sourdough` matching `pre_ferments`), defaulting
+  to `direct` if both are omitted. Drives the yeast/preferment math and the generated
+  fermentation schedule.
 - `style` - optional named style key (see `GET /recipes/styles`, or below). Supplies
   defaults for anything left unset (`hydration_pct`, `salt_pct`, `oil_pct`,
   `ball_weight_g`) and carries the recipe's book/author attribution. Defaults to
   `custom` (generic defaults, no attribution).
 - Any of `hydration_pct`, `salt_pct`, `oil_pct`, `yeast_pct`, `ball_weight_g` you *do*
   set overrides the style default.
-- `poolish_percentage`/`biga_percentage`/`sourdough_percentage` - the preferment's baker's
-  % of total flour weight (grams of preferment flour per 100g of total flour, e.g. the
-  baguette formula's "Poolish 400g / 40%"). Only the one matching `technique` has any
-  effect; each defaults to 40 (poolish/biga) or 20 (sourdough) when left unset. The
-  response's `leavening.percent_of_flour` echoes back whichever value (set or default)
-  was actually used.
 
-The response includes the normalized flour blend with grams, the leavening breakdown
+The response echoes `ingredients.flours` back with `grams` added, and `pre_ferments`
+back with the actually-used percentage (override or default) - empty `[]` for
+direct/same_day/cold_ferment_* techniques. It also includes the leavening breakdown
 (commercial yeast %, or a poolish/biga preferment split, or a sourdough starter %, each
 carrying its own `percent_of_flour`) - both scaled to `num_balls` - plus
-`ingredients_per_ball` (a constant single-ball reference, regardless of `num_balls`),
-`ingredients_total` (the full batch), a step-by-step fermentation schedule, and the
-style's attribution.
+`ingredients_per_ball` (a constant single-ball reference, regardless of `num_balls`,
+**not** to be confused with `ingredients.flours` - different things that happen to
+share a name prefix), `ingredients_total` (the full batch), a step-by-step fermentation
+schedule, and the style's attribution.
 
 ### International flour catalogue
 
-Every `flours[].pizza_flours_id` cited in a request must match an entry from
+Every `ingredients.flours[].pizza_flours_id` cited in a request must match an entry from
 `GET /recipes/flours` - matched case-insensitively against that entry's `id` or any of
 its localized names/codes, so you can use whatever your country calls it: `"00"`,
 `"Farina 00"`, `"Weizenmehl 405"`, and `"T45"` all resolve to the same `soft_wheat_00`
@@ -127,8 +135,9 @@ flours - ~60 entries in total, each with `id`, `category`, `gluten`, `bread`/`pi
 suitability, `max_blend_pct`, and localized `names` (en/it/fr/de). Each entry also
 carries `pizza_flours_id` (mirrors `id`) and `description` (mirrors `notes` where an
 entry has one, else unset) - the same field names used on a recipe request's
-`flours[]`, though there they mean something request-specific: `pizza_flours_id` is
-the caller's lookup key, and `description` is a free-text brand/product note.
+`ingredients.flours[]`, though there they mean something request-specific:
+`pizza_flours_id` is the caller's lookup key, and `description` is a free-text
+brand/product note.
 
 Entries for milled wheat refinement grades (the soft-wheat 00/0/1/2/whole-wheat ladder,
 rye, spelt) also carry `ash_min_pct`/`ash_max_pct` - the ash content (% per 100g of

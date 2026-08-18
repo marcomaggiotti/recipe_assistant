@@ -7,10 +7,49 @@ from typing import Any
 from .config import Settings
 from .db import PizzaRepository
 from .flours import FlourCatalogStore
-from .recipe import STYLE_LIBRARY, TECHNIQUES
+from .recipe import PREFERMENT_TECHNIQUES, STYLE_LIBRARY, TECHNIQUES
 from .recipe import compute_recipe as _compute_recipe
 from .recipe import scale_recipe
 from .styles import StyleStore
+
+# Shared by generate_pizza_recipe/save_pizza_recipe below.
+_INGREDIENTS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "flours": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "pizza_flours_id": {"type": "string"},
+                    "ash%": {"type": "number", "description": "Ash content %, e.g. 0.55 for Italian Tipo 00"},
+                    "description": {"type": "string", "description": "Optional brand/product note, e.g. 'Semola Caputo'"},
+                    "percent": {"type": "number"},
+                },
+                "required": ["pizza_flours_id", "percent"],
+            },
+        },
+    },
+    "required": ["flours"],
+}
+_PRE_FERMENTS_SCHEMA = {
+    "type": "array",
+    "maxItems": 1,
+    "items": {
+        "type": "object",
+        "properties": {
+            "type": {"type": "string", "enum": list(PREFERMENT_TECHNIQUES)},
+            "percentage": {"type": "number", "description": "Baker's % of total flour built into this preferment/starter. Defaults to 40 for poolish/biga, 20 for sourdough, if this entry is omitted entirely."},
+        },
+        "required": ["type", "percentage"],
+    },
+    "description": (
+        "At most one - only one preferment technique can be active per recipe. Its "
+        "`type` becomes the recipe's technique unless `technique` is also given "
+        "explicitly (must then match). Omit entirely for direct/same_day/cold_ferment_* "
+        "techniques, which don't build a separate preferment."
+    ),
+}
 
 TOOLS = [
     {
@@ -19,51 +58,38 @@ TOOLS = [
             "Compute a pizza dough recipe from a flour blend (baker's percentages that "
             "don't need to sum to exactly 100 - they get normalized), a fermentation "
             "technique, and an optional named style anchored to a real pizza-chef/cookbook "
-            "reference. Every flours[].pizza_flours_id must match an entry in the flour catalogue "
-            "(list_pizza_flours) - its id or one of its localized names/codes (e.g. '00', "
-            "'Farina 00', 'Weizenmehl 405', 'T45' all resolve to the same flour); unrecognized "
-            "flour names are rejected. flours[]['ash%'] is optional and only meaningful for "
-            "milled wheat flours (e.g. 0.55 for Italian Tipo 00) - it's cross-checked against "
-            "the resolved flour's ash range and helps disambiguate. flours[].description is an "
-            "optional free-text brand/product note (e.g. 'Semola Caputo') - purely informational, "
-            "not matched against the catalogue. Any of hydration/salt/oil/"
-            "yeast % or ball weight left unset falls back to the chosen style's defaults "
-            "('custom' style = generic defaults with no attribution). poolish_percentage/"
-            "biga_percentage/sourdough_percentage set the preferment's baker's % of total flour "
-            "weight - only the one matching `technique` has any effect, and each defaults to 40 "
-            "(poolish/biga) or 20 (sourdough) when left unset. The formula is always for "
-            "a single dough ball; pass num_balls to scale ingredient quantities up to a batch of "
-            "that many balls (defaults to 1)."
+            "reference. Every ingredients.flours[].pizza_flours_id must match an entry in the "
+            "flour catalogue (list_pizza_flours) - its id or one of its localized names/codes "
+            "(e.g. '00', 'Farina 00', 'Weizenmehl 405', 'T45' all resolve to the same flour); "
+            "unrecognized flour names are rejected. ingredients.flours[]['ash%'] is optional and "
+            "only meaningful for milled wheat flours (e.g. 0.55 for Italian Tipo 00) - it's "
+            "cross-checked against the resolved flour's ash range and helps disambiguate. "
+            "ingredients.flours[].description is an optional free-text brand/product note (e.g. "
+            "'Semola Caputo') - purely informational, not matched against the catalogue. Any of "
+            "hydration/salt/oil/yeast % or ball weight left unset falls back to the chosen "
+            "style's defaults ('custom' style = generic defaults with no attribution). "
+            "pre_ferments (at most one entry) sets a poolish/biga/sourdough preferment and its "
+            "baker's % of total flour - its type becomes the technique if technique is left "
+            "unset; omit both for a plain 'direct' dough, or set technique alone for "
+            "same_day/cold_ferment_24h/48h/72h (no separate preferment). The formula is always "
+            "for a single dough ball; pass num_balls to scale ingredient quantities up to a "
+            "batch of that many balls (defaults to 1)."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "flours": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "pizza_flours_id": {"type": "string"},
-                            "ash%": {"type": "number", "description": "Ash content %, e.g. 0.55 for Italian Tipo 00"},
-                            "description": {"type": "string", "description": "Optional brand/product note, e.g. 'Semola Caputo'"},
-                            "percent": {"type": "number"},
-                        },
-                        "required": ["pizza_flours_id", "percent"],
-                    },
-                },
-                "technique": {"type": "string", "enum": TECHNIQUES},
+                "ingredients": _INGREDIENTS_SCHEMA,
+                "pre_ferments": _PRE_FERMENTS_SCHEMA,
+                "technique": {"type": "string", "enum": TECHNIQUES, "description": "Optional when pre_ferments has an entry (inferred from its type); defaults to 'direct' otherwise."},
                 "style": {"type": "string", "enum": list(STYLE_LIBRARY), "default": "custom"},
                 "hydration_pct": {"type": "number"},
                 "salt_pct": {"type": "number"},
                 "oil_pct": {"type": "number"},
                 "yeast_pct": {"type": "number"},
                 "ball_weight_g": {"type": "number"},
-                "poolish_percentage": {"type": "number", "description": "Poolish baker's % of total flour (technique='poolish' only), default 40"},
-                "biga_percentage": {"type": "number", "description": "Biga baker's % of total flour (technique='biga' only), default 40"},
-                "sourdough_percentage": {"type": "number", "description": "Sourdough starter baker's % of total flour (technique='sourdough' only), default 20"},
                 "num_balls": {"type": "integer", "default": 1, "description": "Batch size to scale the formula to"},
             },
-            "required": ["flours", "technique"],
+            "required": ["ingredients"],
         },
     },
     {
@@ -77,31 +103,17 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "name": {"type": "string"},
-                "flours": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "pizza_flours_id": {"type": "string"},
-                            "ash%": {"type": "number", "description": "Ash content %, e.g. 0.55 for Italian Tipo 00"},
-                            "description": {"type": "string", "description": "Optional brand/product note, e.g. 'Semola Caputo'"},
-                            "percent": {"type": "number"},
-                        },
-                        "required": ["pizza_flours_id", "percent"],
-                    },
-                },
-                "technique": {"type": "string", "enum": TECHNIQUES},
+                "ingredients": _INGREDIENTS_SCHEMA,
+                "pre_ferments": _PRE_FERMENTS_SCHEMA,
+                "technique": {"type": "string", "enum": TECHNIQUES, "description": "Optional when pre_ferments has an entry (inferred from its type); defaults to 'direct' otherwise."},
                 "style": {"type": "string", "enum": list(STYLE_LIBRARY), "default": "custom"},
                 "hydration_pct": {"type": "number"},
                 "salt_pct": {"type": "number"},
                 "oil_pct": {"type": "number"},
                 "yeast_pct": {"type": "number"},
                 "ball_weight_g": {"type": "number"},
-                "poolish_percentage": {"type": "number", "description": "Poolish baker's % of total flour (technique='poolish' only), default 40"},
-                "biga_percentage": {"type": "number", "description": "Biga baker's % of total flour (technique='biga' only), default 40"},
-                "sourdough_percentage": {"type": "number", "description": "Sourdough starter baker's % of total flour (technique='sourdough' only), default 20"},
             },
-            "required": ["name", "flours", "technique"],
+            "required": ["name", "ingredients"],
         },
     },
     {
@@ -112,7 +124,7 @@ TOOLS = [
     {
         "name": "list_pizza_flours",
         "description": (
-            "List the international flour catalogue. Every flours[].pizza_flours_id on "
+            "List the international flour catalogue. Every ingredients.flours[].pizza_flours_id on "
             "generate_pizza_recipe/save_pizza_recipe must match one of these entries' id "
             "or one of its localized names/codes (names differ by country). Entries for milled "
             "wheat refinement grades also carry ash_min_pct/ash_max_pct."
@@ -156,22 +168,41 @@ SYSTEM_PROMPT = (
 )
 
 
+def _resolve_technique(tool_input: dict[str, Any]) -> tuple[str, float | None]:
+    """Mirrors RecipeGenerateRequest._resolve_technique in schemas.py: pre_ferments[0].type
+    becomes the technique unless an explicit (matching) technique is also given; defaults
+    to 'direct' when neither is set. Returns (technique, pre_ferment_percentage)."""
+    pre_ferments = tool_input.get("pre_ferments") or []
+    if len(pre_ferments) > 1:
+        raise ValueError("only one pre_ferment is currently supported")
+    technique = tool_input.get("technique")
+    if pre_ferments:
+        inferred = pre_ferments[0]["type"]
+        if technique is not None and technique != inferred:
+            raise ValueError(f"technique '{technique}' does not match pre_ferments[0].type '{inferred}'")
+        return inferred, pre_ferments[0].get("percentage")
+    return technique or "direct", None
+
+
 def _generate(style_store: StyleStore, flour_store: FlourCatalogStore, tool_input: dict[str, Any]) -> dict[str, Any]:
     style = tool_input.get("style", "custom")
     style_defaults = style_store.get(style)
     if style_defaults is None:
         raise ValueError(f"unknown style '{style}'")
 
+    flours = tool_input["ingredients"]["flours"]
     unknown = [
-        f["pizza_flours_id"] for f in tool_input["flours"]
+        f["pizza_flours_id"] for f in flours
         if flour_store.resolve(f["pizza_flours_id"], f.get("ash%")) is None
     ]
     if unknown:
         raise ValueError(f"unknown flour type(s): {', '.join(unknown)} - see list_pizza_flours for the allowed catalogue")
 
+    technique, pre_ferment_percentage = _resolve_technique(tool_input)
+
     return _compute_recipe(
-        flours=tool_input["flours"],
-        technique=tool_input["technique"],
+        flours=flours,
+        technique=technique,
         style=style,
         style_defaults=style_defaults,
         hydration_pct=tool_input.get("hydration_pct"),
@@ -179,9 +210,7 @@ def _generate(style_store: StyleStore, flour_store: FlourCatalogStore, tool_inpu
         oil_pct=tool_input.get("oil_pct"),
         yeast_pct=tool_input.get("yeast_pct"),
         ball_weight_g=tool_input.get("ball_weight_g"),
-        poolish_percentage=tool_input.get("poolish_percentage"),
-        biga_percentage=tool_input.get("biga_percentage"),
-        sourdough_percentage=tool_input.get("sourdough_percentage"),
+        pre_ferment_percentage=pre_ferment_percentage,
     )
 
 
