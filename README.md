@@ -43,10 +43,10 @@ page if that service has its own `API_KEY` set.
 
 ### Browser pages
 
-Six small, dependency-free HTML/JS pages (no frontend build step, shared styling via
+Eight small, dependency-free HTML/JS pages (no frontend build step, shared styling via
 `app/static/theme.css`), served directly by this FastAPI app:
 
-- **`/`** - home page with a nav menu linking the other five, plus `/docs`.
+- **`/`** - home page with a nav menu linking the other seven, plus `/docs`.
 - **`/flour-explorer`** - queries [flour-service](https://github.com/marcomaggiotti/flour_service)
   directly from the browser; filter by category, gluten, bread/pizza suitability,
   strength tier, or ash%, or look up one flour by name/national type code. Renders
@@ -68,11 +68,21 @@ Six small, dependency-free HTML/JS pages (no frontend build step, shared styling
 - **`/saved-recipes`** - browse saved recipes as a card grid (`GET /recipes`); click one
   to see its full breakdown and fermentation schedule rendered as a step-by-step
   pipeline (`GET /recipes/{id}`).
+- **`/compose-pizza`** - pick toppings from the full menu (a filterable card grid backed
+  by topping-service's `GET /toppings`) to build a pizza; composite toppings (e.g. Pesto)
+  show a "recipe" badge and an expandable components breakdown. Client-side only - no
+  new persisted resource, just a running "your pizza" selection panel.
+- **`/toppings`** - add a topping (single ingredient, or composite with named
+  components) via topping-service's `POST /toppings`, and browse/filter/delete what's
+  already on the menu.
 
 `/flour-explorer`, `/flour-products/new`, and `/new-recipe` call `flour-service`
 directly from client-side JS: set `FLOUR_SERVICE_URL` to point at a different
-deployment (default `https://flour-service.onrender.com`), e.g. `http://localhost:8001`
-if you're running flour-service locally too. `/pre-ferments` and `/saved-recipes` only
+deployment (default `https://flour-service.onrender.com`), e.g. `http://localhost:8002`
+if you're running flour-service locally too (not 8001 - that's topping-service's port).
+`/compose-pizza` and `/toppings` likewise call **topping-service** directly: set
+`TOPPING_SERVICE_URL` (default `http://localhost:8001`, matching `docker-compose.yml`'s
+port mapping - see "topping-service" below). `/pre-ferments` and `/saved-recipes` only
 talk to this service's own API.
 
 ## The recipe model
@@ -264,13 +274,26 @@ colliding - see `.env.example`.
 | Method | Path | Description |
 |--------|------|--------------|
 | GET | `/health` | Liveness check |
-| POST | `/toppings` | Create a topping - `name`, `category` (`meat`/`vegetable`/`cheese`/`sauce`/`other`), `vegetarian`, `vegan`, optional `description` |
+| POST | `/toppings` | Create a topping - `name`, `category` (`meat`/`vegetable`/`cheese`/`sauce`/`other`), `vegetarian`, `vegan`, optional `description`, optional `components` |
 | GET | `/toppings` | List toppings (`limit`, `offset`) |
 | GET | `/toppings/{id}` | Get one topping |
 | DELETE | `/toppings/{id}` | Delete a topping |
 
 Same auth convention as pizza-service: set `TOPPING_API_KEY` to require header
 `X-API-Key` on mutating requests; leave it empty (default) to disable auth for local dev.
+
+A topping can be a single ingredient, or **composite** - itself a small recipe, e.g.
+Pesto or Ricotta with lemon zest - by setting `components`, a list of
+`{"name": ..., "amount": ...}` entries (`amount` is optional free text, e.g. `"2 tbsp"`).
+This is purely descriptive metadata, unlike `pre_ferment_types`' components which the
+dough engine actually uses in a computation - nothing here computes anything from a
+topping's components.
+
+The table starts pre-populated: the first time it's empty, `build_repository()` seeds a
+~35-item pizzeria menu (`topping_service/catalog.py`'s `TOPPING_CATALOG`) covering
+cheese/sauce/meat/vegetable/other, including a few composite examples (Pesto, Ricotta
+with lemon zest, Caponata, Salsa verde). It's still a fully mutable, user-editable
+catalog after that - add, edit, or delete freely via the API or the `/toppings` page.
 
 ## Deploy to Render
 

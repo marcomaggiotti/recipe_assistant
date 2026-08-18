@@ -14,11 +14,13 @@
   <a class="navlink" href="/new-recipe">New Recipe</a>
   <a class="navlink" href="/pre-ferments">Pre-ferments</a>
   <a class="navlink" href="/saved-recipes">Recipes</a>
+  <a class="navlink" href="/compose-pizza">Compose Pizza</a>
+  <a class="navlink" href="/toppings">Toppings</a>
 </div></nav>
 <div class="wrap">
   <header class="page-head">
     <h1>Pizza Service</h1>
-    <p class="subtitle">Dough formulas for pizza and bread - a flour blend and an optional pre-ferment, turned into ingredient weights and a schedule.</p>
+    <p class="subtitle">Dough formulas for pizza and bread - a flour blend and an optional pre-ferment, turned into ingredient weights and a schedule - plus a topping menu to compose a pizza from.</p>
   </header>
 
   <div class="menu-grid">
@@ -47,6 +49,16 @@
       <h2>Recipes</h2>
       <p>Browse saved recipes and see any one's fermentation schedule as a pipeline.</p>
     </a>
+    <a class="menu-card" href="/compose-pizza">
+      <div class="icon">🍕</div>
+      <h2>Compose Pizza</h2>
+      <p>Pick toppings from the menu, including composite ones like pesto or ricotta with lemon zest.</p>
+    </a>
+    <a class="menu-card" href="/toppings">
+      <div class="icon">🧀</div>
+      <h2>Toppings</h2>
+      <p>Add toppings to the pizzeria menu - plain ingredients or composite ones made from their own recipe.</p>
+    </a>
     <a class="menu-card" href="/docs">
       <div class="icon">📄</div>
       <h2>API Docs</h2>
@@ -54,7 +66,7 @@
     </a>
   </div>
 
-  <footer class="hint">Flour catalogue and product-link data are served live from <a href="__FLOUR_SERVICE_URL__/docs" target="_blank" rel="noopener">flour-service</a>.</footer>
+  <footer class="hint">Flour catalogue and product-link data are served live from <a href="__FLOUR_SERVICE_URL__/docs" target="_blank" rel="noopener">flour-service</a>; the topping menu from <a href="__TOPPING_SERVICE_URL__/docs" target="_blank" rel="noopener">topping-service</a>.</footer>
 </div>
 </body>
 </html>

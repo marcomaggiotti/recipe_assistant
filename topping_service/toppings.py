@@ -1,6 +1,11 @@
 """Topping catalog storage - mirrors app/db.py's PizzaRepository pattern (sqlite by
 default, Postgres or Azure Cosmos DB via DB_BACKEND/TOPPING_DB_BACKEND), but as its own
 independent store for this service's own `toppings` table/container.
+
+build_repository() seeds TOPPING_CATALOG (see catalog.py) into the table the first time
+it's empty, so the service starts with a real pizzeria menu to browse/select from rather
+than an empty list - toppings are still a fully mutable, user-editable catalog though
+(unlike the read-mostly flour catalog), so this is just a starting point.
 """
 from __future__ import annotations
 
@@ -11,6 +16,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Any
 
+from .catalog import TOPPING_CATALOG
 from .config import Settings
 
 
@@ -161,9 +167,20 @@ class CosmosToppingRepository(ToppingRepository):
             return False
 
 
+def _seed_if_empty(repo: ToppingRepository) -> None:
+    _, total = repo.list(1, 0)
+    if total:
+        return
+    for topping in TOPPING_CATALOG:
+        repo.create(dict(topping))
+
+
 def build_repository(settings: Settings) -> ToppingRepository:
     if settings.db_backend == "postgres":
-        return PostgresToppingRepository(settings)
-    if settings.db_backend == "cosmos":
-        return CosmosToppingRepository(settings)
-    return SqliteToppingRepository(settings)
+        repo: ToppingRepository = PostgresToppingRepository(settings)
+    elif settings.db_backend == "cosmos":
+        repo = CosmosToppingRepository(settings)
+    else:
+        repo = SqliteToppingRepository(settings)
+    _seed_if_empty(repo)
+    return repo
