@@ -42,20 +42,30 @@
 
     <div id="preferment-panel" style="display:none;" class="field wide">
       <div class="field">
-        <label for="f-preferment-source">Pre-ferment source</label>
-        <select id="f-preferment-source">
-          <option value="inline">Inline components (e.g. biga 60% / poolish 40%)</option>
-        </select>
+        <label for="f-preferment-type">Pre-ferment blend</label>
+        <select id="f-preferment-type"></select>
       </div>
       <div class="field">
         <label for="f-preferment-pct">Pre-ferment % of total flour</label>
         <input id="f-preferment-pct" type="number" min="0" max="100" step="1" placeholder="40">
       </div>
-      <div id="preferment-inline-fields" class="field wide">
-        <label>Named components (percentages must sum to 100)</label>
-        <div id="preferment-rows"></div>
-        <button type="button" id="add-preferment-row-btn" style="align-self:flex-start;">+ Add component</button>
-      </div>
+
+      <details class="advanced">
+        <summary>Save a new blend (e.g. biga 60% / poolish 40%)</summary>
+        <div style="margin-top:10px;">
+          <div class="field">
+            <label for="f-new-blend-id">Blend id</label>
+            <input id="f-new-blend-id" type="text" placeholder="e.g. biga60_poolish40">
+          </div>
+          <label>Named components (percentages must sum to 100)</label>
+          <div id="preferment-rows"></div>
+          <button type="button" id="add-preferment-row-btn" style="align-self:flex-start;">+ Add component</button>
+          <div class="actions-row">
+            <button type="button" id="save-blend-btn">Save blend</button>
+          </div>
+          <div id="blend-status" class="status-line"></div>
+        </div>
+      </details>
     </div>
 
     <details class="advanced">
@@ -96,11 +106,13 @@
     addRowBtn: document.getElementById("add-row-btn"),
     usePreferment: document.getElementById("f-use-preferment"),
     prefermentPanel: document.getElementById("preferment-panel"),
-    prefermentSource: document.getElementById("f-preferment-source"),
+    prefermentType: document.getElementById("f-preferment-type"),
     prefermentPct: document.getElementById("f-preferment-pct"),
-    prefermentInlineFields: document.getElementById("preferment-inline-fields"),
+    newBlendId: document.getElementById("f-new-blend-id"),
     prefermentRows: document.getElementById("preferment-rows"),
     addPrefermentRowBtn: document.getElementById("add-preferment-row-btn"),
+    saveBlendBtn: document.getElementById("save-blend-btn"),
+    blendStatus: document.getElementById("blend-status"),
     hydration: document.getElementById("f-hydration"),
     salt: document.getElementById("f-salt"),
     oil: document.getElementById("f-oil"),
@@ -210,17 +222,19 @@
     addBlendRow(options);
   }
 
-  async function loadPreFermentTypes() {
+  async function loadPreFermentTypes(selectId) {
     try {
       const data = await ownFetch("/pre-ferment-types");
+      els.prefermentType.innerHTML = "";
       for (const item of data.items) {
         const opt = document.createElement("option");
         opt.value = item.id;
         opt.textContent = item.id + " (" + item.preferments.map((p) => p.name + " " + p.percentage + "%").join(" / ") + ")";
-        els.prefermentSource.appendChild(opt);
+        els.prefermentType.appendChild(opt);
       }
+      if (selectId) els.prefermentType.value = selectId;
     } catch (e) {
-      // pre-ferment-types requires DB_BACKEND=postgres - just skip saved blends if unavailable.
+      els.prefermentType.innerHTML = "<option value=''>No saved blends (requires a Postgres backend)</option>";
     }
   }
 
@@ -228,8 +242,25 @@
     els.prefermentPanel.style.display = els.usePreferment.checked ? "" : "none";
   });
 
-  els.prefermentSource.addEventListener("change", () => {
-    els.prefermentInlineFields.style.display = els.prefermentSource.value === "inline" ? "" : "none";
+  els.saveBlendBtn.addEventListener("click", async () => {
+    const id = els.newBlendId.value.trim();
+    const rows = Array.from(els.prefermentRows.querySelectorAll(".blend-row"));
+    const preferments = rows.map((row) => {
+      const [nameField, percentField] = row.querySelectorAll("input");
+      return { name: nameField.value.trim(), percentage: parseFloat(percentField.value) };
+    });
+    if (!id) {
+      setStatus(els.blendStatus, "Blend id is required.", "error");
+      return;
+    }
+    setStatus(els.blendStatus, "Saving blend…");
+    try {
+      await ownFetch("/pre-ferment-types", { method: "POST", body: JSON.stringify({ id, preferments }) });
+      setStatus(els.blendStatus, "Blend saved.", "ok");
+      await loadPreFermentTypes(id);
+    } catch (e) {
+      setStatus(els.blendStatus, "Couldn't save blend: " + e.message, "error");
+    }
   });
 
   els.addRowBtn.addEventListener("click", async () => {
@@ -263,18 +294,9 @@
 
   function collectPreFerment() {
     if (!els.usePreferment.checked) return undefined;
-    const preFerment = {};
+    const preFerment = { type_id: els.prefermentType.value };
     const pct = numOrUndefined(els.prefermentPct);
     if (pct !== undefined) preFerment.percentage = pct;
-    if (els.prefermentSource.value === "inline") {
-      const rows = Array.from(els.prefermentRows.querySelectorAll(".blend-row"));
-      preFerment.components = rows.map((row) => {
-        const [nameField, percentField] = row.querySelectorAll("input");
-        return { name: nameField.value.trim(), percentage: parseFloat(percentField.value) };
-      });
-    } else {
-      preFerment.type_id = els.prefermentSource.value;
-    }
     return preFerment;
   }
 

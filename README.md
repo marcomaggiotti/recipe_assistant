@@ -1,10 +1,10 @@
 # Pizza Service (AI Agent)
 
 FastAPI microservice that turns a **flour blend** (baker's percentages) and an optional
-**pre-ferment** (one or more named components, e.g. biga 60% / poolish 40%) into a
-scaled pizza dough recipe: ingredient weights, a preferment breakdown where relevant,
-and a fermentation schedule. Also exposes a built-in AI agent endpoint (`/agent/chat`)
-that can do the same from a natural-language instruction via Anthropic tool-calling.
+**pre-ferment** (a reusable named blend, e.g. biga 60% / poolish 40%) into a scaled
+pizza dough recipe: ingredient weights, a preferment breakdown where relevant, and a
+fermentation schedule. Also exposes a built-in AI agent endpoint (`/agent/chat`) that
+can do the same from a natural-language instruction via Anthropic tool-calling.
 
 Extracted from the [`ict_project`](https://github.com/marcomaggiotti/ict_project) monorepo
 as a standalone, self-contained service (own dependencies, Dockerfile, config).
@@ -51,9 +51,10 @@ Four small, dependency-free HTML/JS pages (no frontend build step, shared stylin
   what's already linked. Warns if flour-service is currently running with an in-memory
   backend (added products would be lost on its next restart).
 - **`/new-recipe`** - build a dough formula (flour blend rows populated from
-  flour-service, an optional pre-ferment with one or more named components, optional
-  hydration/salt/oil/yeast overrides) and save it via this service's own `POST /recipes`;
-  shows the computed result and a list of recently saved recipes. Deliberately not at
+  flour-service, an optional pre-ferment referencing a saved blend - with a way to save
+  a new named blend, e.g. biga 60% / poolish 40%, inline - optional hydration/salt/oil/
+  yeast overrides) and save it via this service's own `POST /recipes`; shows the
+  computed result and a list of recently saved recipes. Deliberately not at
   `/recipes/new` - that would collide with `GET /recipes/{item_id}`.
 
 All of them call `flour-service` directly from client-side JS: set `FLOUR_SERVICE_URL`
@@ -77,10 +78,7 @@ separate, query-time concern (`?num_balls=N` on `/recipes/generate` and
     ]
   },
   "pre_ferment": {
-    "components": [
-      {"name": "biga", "percentage": 60},
-      {"name": "poolish", "percentage": 40}
-    ],
+    "type_id": "biga60_poolish40",
     "percentage": 35
   },
   "hydration_pct": 75,
@@ -100,18 +98,14 @@ separate, query-time concern (`?num_balls=N` on `/recipes/generate` and
   `description` is an optional free-text note for the specific brand/product used (e.g.
   `"Semola Caputo"`) - purely informational, not matched against the catalogue.
 - `pre_ferment` - optional; omit entirely for a plain commercial-yeast dough. When set,
-  it builds ONE aggregate preferment - named components are descriptive/echoed metadata
-  only, never computed separately (so "biga 60% / poolish 40%" produces a single
-  preferment mass, not two separately-computed ones). Either:
-  - `components` - inline named components, e.g.
-    `[{"name": "biga", "percentage": 60}, {"name": "poolish", "percentage": 40}]`
-    (percentages must sum to 100), **or**
-  - `type_id` - references a reusable blend saved via `POST /pre-ferment-types` (see
-    below) instead of describing components inline.
-
-  Set exactly one of `components`/`type_id`. `percentage` is the preferment's baker's %
-  of total flour weight (grams of preferment flour per 100g of total flour, e.g. the
-  baguette formula's "Poolish 400g / 40%"); defaults to 40 when omitted.
+  it builds ONE aggregate preferment from a reusable blend - named components (e.g.
+  "biga 60% / poolish 40%") are descriptive/echoed metadata only, never computed
+  separately (a single preferment mass, not two separately-computed ones):
+  - `type_id` - references a blend saved via `POST /pre-ferment-types` (see below), e.g.
+    `"biga60_poolish40"`. Required.
+  - `percentage` - the preferment's baker's % of total flour weight (grams of preferment
+    flour per 100g of total flour, e.g. the baguette formula's "Poolish 400g / 40%");
+    defaults to 40 when omitted.
 - Any of `hydration_pct`, `salt_pct`, `oil_pct`, `yeast_pct`, `ball_weight_g` left unset
   falls back to a generic baker's-percentage default (62% hydration, 2.5% salt, 0% oil,
   250g ball weight).

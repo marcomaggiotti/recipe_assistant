@@ -34,28 +34,16 @@ _INGREDIENTS_SCHEMA = {
 _PRE_FERMENT_SCHEMA = {
     "type": "object",
     "description": (
-        "Omit entirely for a plain commercial-yeast dough. Set to build a preferment - "
-        "either inline named components (e.g. biga 60% / poolish 40%) or a type_id "
-        "reference to a saved blend from list_pre_ferment_types. The engine always "
-        "computes ONE aggregate preferment formula; named components are descriptive "
-        "only, never computed separately."
+        "Omit entirely for a plain commercial-yeast dough. Set to build a preferment "
+        "from a saved blend (see list_pre_ferment_types for the available type_ids, "
+        "e.g. one with named components like biga 60% / poolish 40%). The engine "
+        "computes ONE aggregate preferment formula from the referenced blend."
     ),
     "properties": {
-        "type_id": {"type": "string", "description": "References a saved blend instead of describing components inline. Set this or `components`, not both."},
-        "components": {
-            "type": "array",
-            "description": "Inline named components, e.g. [{'name': 'biga', 'percentage': 60}, {'name': 'poolish', 'percentage': 40}] - percentages must sum to 100. Set this or `type_id`, not both.",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "description": "e.g. 'biga', 'sourdough', 'poolish'"},
-                    "percentage": {"type": "number", "description": "This component's share of the preferment mix itself, not of total dough flour"},
-                },
-                "required": ["name", "percentage"],
-            },
-        },
+        "type_id": {"type": "string", "description": "References a saved blend from list_pre_ferment_types, e.g. 'biga100' or 'biga60_poolish40'."},
         "percentage": {"type": "number", "description": "Baker's % of total flour built into the preferment. Defaults to 40 if omitted."},
     },
+    "required": ["type_id"],
 }
 
 TOOLS = [
@@ -73,8 +61,8 @@ TOOLS = [
             "ingredients.flours[].description is an optional free-text brand/product note (e.g. "
             "'Semola Caputo') - purely informational, not matched against the catalogue. Any of "
             "hydration/salt/oil/yeast % or ball weight left unset falls back to a generic "
-            "baker's-percentage default. pre_ferment (optional) builds a preferment - see its "
-            "schema for the type_id vs inline-components choice. The formula is always for a "
+            "baker's-percentage default. pre_ferment (optional) builds a preferment from a "
+            "saved blend by type_id (see list_pre_ferment_types). The formula is always for a "
             "single dough ball; pass num_balls to scale ingredient quantities up to a batch of "
             "that many balls (defaults to 1)."
         ),
@@ -168,25 +156,16 @@ SYSTEM_PROMPT = (
 
 def _resolve_pre_ferment(pre_ferment_store: PreFermentTypeStore, tool_input: dict[str, Any]) -> dict[str, Any] | None:
     """Mirrors routers/pizza.py's _resolve_pre_ferment: turns the tool call's pre_ferment
-    (inline components, or a type_id reference) into the {"components": [...],
-    "percentage": ...} shape compute_recipe() expects."""
+    (a type_id reference) into the {"components": [...], "percentage": ...} shape
+    compute_recipe() expects."""
     pre_ferment = tool_input.get("pre_ferment")
     if not pre_ferment:
         return None
-    type_id = pre_ferment.get("type_id")
-    components = pre_ferment.get("components")
-    if bool(type_id) == bool(components):
-        raise ValueError("set exactly one of pre_ferment.type_id or pre_ferment.components")
-    if type_id is not None:
-        saved = pre_ferment_store.get(type_id)
-        if saved is None:
-            raise ValueError(f"unknown pre_ferment type_id '{type_id}'")
-        components = saved["preferments"]
-    else:
-        total = sum(c["percentage"] for c in components)
-        if abs(total - 100.0) > 0.5:
-            raise ValueError(f"pre_ferment.components percentages must sum to 100 (got {total:.1f})")
-    return {"components": components, "percentage": pre_ferment.get("percentage", 40.0)}
+    type_id = pre_ferment["type_id"]
+    saved = pre_ferment_store.get(type_id)
+    if saved is None:
+        raise ValueError(f"unknown pre_ferment type_id '{type_id}'")
+    return {"components": saved["preferments"], "percentage": pre_ferment.get("percentage", 40.0)}
 
 
 def _generate(pre_ferment_store: PreFermentTypeStore, flour_store: FlourCatalogStore, tool_input: dict[str, Any]) -> dict[str, Any]:

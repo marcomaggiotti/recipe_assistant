@@ -186,46 +186,7 @@ def test_api_generate_defaults_to_no_pre_ferment_when_omitted():
     assert response.json()["pre_ferment"] is None
 
 
-def test_api_generate_accepts_multiple_named_pre_ferment_components():
-    response = client.post(
-        "/recipes/generate",
-        json={
-            "ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}]},
-            "pre_ferment": {
-                "components": [{"name": "biga", "percentage": 60}, {"name": "poolish", "percentage": 40}],
-                "percentage": 35,
-            },
-        },
-    )
-    assert response.status_code == 200
-    body = response.json()
-    assert body["pre_ferment"]["components"] == [{"name": "biga", "percentage": 60}, {"name": "poolish", "percentage": 40}]
-    assert body["leavening"]["percent_of_flour"] == 35
-
-
-def test_api_generate_rejects_components_not_summing_to_100():
-    response = client.post(
-        "/recipes/generate",
-        json={
-            "ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}]},
-            "pre_ferment": {"components": [{"name": "biga", "percentage": 60}, {"name": "poolish", "percentage": 30}]},
-        },
-    )
-    assert response.status_code == 422
-
-
-def test_api_generate_rejects_setting_both_type_id_and_components():
-    response = client.post(
-        "/recipes/generate",
-        json={
-            "ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}]},
-            "pre_ferment": {"type_id": "biga100", "components": [{"name": "biga", "percentage": 100}]},
-        },
-    )
-    assert response.status_code == 422
-
-
-def test_api_generate_rejects_setting_neither_type_id_nor_components():
+def test_api_generate_rejects_pre_ferment_without_type_id():
     response = client.post(
         "/recipes/generate",
         json={
