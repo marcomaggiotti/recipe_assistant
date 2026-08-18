@@ -6,13 +6,12 @@ from ..db import build_repository
 from ..flours import build_flour_catalog_store
 from ..recipe import compute_recipe as _compute_recipe
 from ..recipe import scale_recipe
-from ..schemas import GeneratedRecipe, RecipeGenerateRequest, StyleAttribution, StyleInfo
-from ..styles import build_style_store
+from ..schemas import GeneratedRecipe, PreFerment, RecipeGenerateRequest
+from .pre_ferment_types import get_pre_ferment_type_store
 
 router = APIRouter(prefix="/recipes", tags=["recipes"], dependencies=[Depends(require_api_key)])
 
 _repo = None
-_style_store = None
 _flour_catalog_store = None
 
 
@@ -23,13 +22,6 @@ def get_repo():
     return _repo
 
 
-def get_style_store():
-    global _style_store
-    if _style_store is None:
-        _style_store = build_style_store(get_settings())
-    return _style_store
-
-
 def get_flour_catalog_store():
     global _flour_catalog_store
     if _flour_catalog_store is None:
@@ -37,13 +29,28 @@ def get_flour_catalog_store():
     return _flour_catalog_store
 
 
+def _resolve_pre_ferment(pre_ferment: PreFerment | None) -> dict | None:
+    """Turns a request's PreFerment (inline components, or a type_id reference into
+    the Postgres pre_ferment_types table) into the resolved {"components": [...],
+    "percentage": ...} shape compute_recipe() expects."""
+    if pre_ferment is None:
+        return None
+    if pre_ferment.type_id is not None:
+        try:
+            saved = get_pre_ferment_type_store().get(pre_ferment.type_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        if saved is None:
+            raise HTTPException(status_code=400, detail=f"unknown pre_ferment type_id '{pre_ferment.type_id}'")
+        components = saved["preferments"]
+    else:
+        components = [c.model_dump() for c in pre_ferment.components]
+    return {"components": components, "percentage": pre_ferment.percentage}
+
+
 def compute_recipe(request: RecipeGenerateRequest) -> dict:
     """Computes the single-ball formula (baseline, num_balls=1 equivalent). Callers
     apply scale_recipe() themselves for the batch size they actually want."""
-    style_defaults = get_style_store().get(request.style)
-    if style_defaults is None:
-        raise HTTPException(status_code=400, detail=f"unknown style '{request.style}'")
-
     catalog = get_flour_catalog_store()
     resolved = [(f, catalog.resolve(f.pizza_flours_id, f.ash_pct)) for f in request.ingredients.flours]
     unknown = [f.pizza_flours_id for f, flour in resolved if flour is None]
@@ -62,20 +69,17 @@ def compute_recipe(request: RecipeGenerateRequest) -> dict:
         )
     ]
 
-    pre_ferment_percentage = request.pre_ferments[0].percentage if request.pre_ferments else None
+    pre_ferment = _resolve_pre_ferment(request.pre_ferment)
 
     try:
         result = _compute_recipe(
             flours=[f.model_dump(by_alias=True) for f in request.ingredients.flours],
-            technique=request.technique,
-            style=request.style,
-            style_defaults=style_defaults,
+            pre_ferment=pre_ferment,
             hydration_pct=request.hydration_pct,
             salt_pct=request.salt_pct,
             oil_pct=request.oil_pct,
             yeast_pct=request.yeast_pct,
             ball_weight_g=request.ball_weight_g,
-            pre_ferment_percentage=pre_ferment_percentage,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
@@ -83,26 +87,11 @@ def compute_recipe(request: RecipeGenerateRequest) -> dict:
     return result
 
 
-@router.get("/styles", response_model=list[StyleInfo])
-def list_styles():
-    return [
-        StyleInfo(
-            style=key,
-            technique=s["technique"],
-            hydration_pct=s["hydration_pct"],
-            salt_pct=s["salt_pct"],
-            oil_pct=s["oil_pct"],
-            ball_weight_g=s["ball_weight_g"],
-            style_attribution=StyleAttribution(
-                label=s["label"],
-                author=s["author"],
-                book=s["book"],
-                suggested_flours=s["suggested_flours"],
-                notes=s["notes"],
-            ),
-        )
-        for key, s in get_style_store().list().items()
-    ]
+def _default_recipe_name(pre_ferment: dict | None) -> str:
+    if pre_ferment is None:
+        return "Direct dough"
+    blend = " / ".join(f"{c['name']} {c['percentage']:.0f}%" for c in pre_ferment["components"])
+    return f"{blend} preferment dough"
 
 
 @router.get("/flours")
@@ -125,7 +114,7 @@ def create_recipe(request: RecipeGenerateRequest):
     """Compute the single-ball dough formula and save it - a saved recipe is always
     one ball's worth; pass ?num_balls=N to GET /recipes/{id} to scale it to a batch."""
     result = compute_recipe(request)
-    name = request.name or f"{result['style_attribution']['label']} ({result['technique']})"
+    name = request.name or _default_recipe_name(result["pre_ferment"])
     record = get_repo().create(name, result)
     return scale_recipe(record, 1)
 

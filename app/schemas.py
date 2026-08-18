@@ -1,18 +1,6 @@
 from datetime import datetime
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-from .recipe import PREFERMENT_TECHNIQUES, TECHNIQUES
-
-Technique = Literal[
-    "direct", "same_day", "poolish", "biga", "sourdough",
-    "cold_ferment_24h", "cold_ferment_48h", "cold_ferment_72h",
-]
-assert list(Technique.__args__) == TECHNIQUES  # keep schema and engine in sync
-
-PreFermentType = Literal["poolish", "biga", "sourdough"]
-assert list(PreFermentType.__args__) == list(PREFERMENT_TECHNIQUES)  # keep schema and engine in sync
 
 
 class FlourComponent(BaseModel):
@@ -45,14 +33,47 @@ class Ingredients(BaseModel):
     flours: list[FlourComponent] = Field(min_length=1)
 
 
-class PreFerment(BaseModel):
-    type: PreFermentType
+class PreFermentComponent(BaseModel):
+    name: str = Field(min_length=1, description="e.g. 'biga', 'sourdough', 'poolish'.")
     percentage: float = Field(
-        ge=0, le=100,
-        description="Baker's % of the preferment/starter relative to total flour weight (grams of "
-                    "preferment flour, or starter, per 100g of total flour). Defaults to 40 for "
-                    "poolish/biga, 20 for sourdough, when this entry is omitted entirely.",
+        gt=0, le=100, description="This component's share of the preferment mix itself (not of "
+                                   "total dough flour), e.g. biga 60 / poolish 40.",
     )
+
+
+class PreFerment(BaseModel):
+    """A recipe's preferment - either described inline as one or more named components
+    (e.g. biga 60% / poolish 40%), or by referencing a reusable blend from
+    GET /pre-ferment-types via `type_id`. Either way, the engine computes ONE aggregate
+    preferment formula; named components are descriptive/echoed metadata only, never
+    computed separately."""
+
+    type_id: str | None = Field(
+        default=None,
+        description="References a saved blend from GET /pre-ferment-types instead of "
+                    "describing components inline. Set this or `components`, not both.",
+    )
+    components: list[PreFermentComponent] | None = Field(
+        default=None,
+        description="Inline named components, e.g. [{'name': 'biga', 'percentage': 60}, "
+                    "{'name': 'poolish', 'percentage': 40}]. Percentages must sum to 100. "
+                    "Set this or `type_id`, not both.",
+    )
+    percentage: float = Field(
+        default=40.0, ge=0, le=100,
+        description="Baker's % of total flour built into the preferment (grams of preferment "
+                    "flour per 100g of total flour). Defaults to 40.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_components(self) -> "PreFerment":
+        if bool(self.type_id) == bool(self.components):
+            raise ValueError("set exactly one of pre_ferment.type_id or pre_ferment.components")
+        if self.components is not None:
+            total = sum(c.percentage for c in self.components)
+            if abs(total - 100.0) > 0.5:
+                raise ValueError(f"pre_ferment.components percentages must sum to 100 (got {total:.1f})")
+        return self
 
 
 class RecipeGenerateRequest(BaseModel):
@@ -62,46 +83,16 @@ class RecipeGenerateRequest(BaseModel):
 
     name: str | None = None
     ingredients: Ingredients
-    pre_ferments: list[PreFerment] = Field(
-        default_factory=list, max_length=1,
-        description="At most one, for now - only one preferment technique can be active per "
-                    "recipe. Its `type` becomes the recipe's technique unless `technique` is also "
-                    "given explicitly, in which case they must match. Omit entirely for "
-                    "direct/same_day/cold_ferment_* techniques (no separate preferment).",
-    )
-    technique: Technique | None = Field(
+    pre_ferment: PreFerment | None = Field(
         default=None,
-        description="Optional when pre_ferments has an entry (inferred from its type); otherwise "
-                    "defaults to 'direct'. Required only to select a non-preferment technique "
-                    "(same_day, cold_ferment_24h/48h/72h) or 'direct' explicitly.",
+        description="Omit for a plain commercial-yeast dough. Set to build a preferment - "
+                    "either inline named components or a type_id reference (see PreFerment).",
     )
-    style: str = "custom"
     hydration_pct: float | None = Field(default=None, ge=0, le=100)
     salt_pct: float | None = Field(default=None, ge=0)
     oil_pct: float | None = Field(default=None, ge=0)
     yeast_pct: float | None = Field(default=None, ge=0)
     ball_weight_g: float | None = Field(default=None, gt=0)
-
-    @model_validator(mode="after")
-    def _resolve_technique(self) -> "RecipeGenerateRequest":
-        if self.pre_ferments:
-            inferred = self.pre_ferments[0].type
-            if self.technique is not None and self.technique != inferred:
-                raise ValueError(
-                    f"technique '{self.technique}' does not match pre_ferments[0].type '{inferred}'"
-                )
-            self.technique = inferred
-        elif self.technique is None:
-            self.technique = "direct"
-        return self
-
-
-class StyleAttribution(BaseModel):
-    label: str
-    author: str | None
-    book: str | None
-    suggested_flours: list[str]
-    notes: str
 
 
 class GeneratedRecipe(BaseModel):
@@ -115,8 +106,7 @@ class GeneratedRecipe(BaseModel):
     that happen to share a name prefix - not a typo."""
 
     ingredients: dict
-    pre_ferments: list[dict]
-    technique: str
+    pre_ferment: dict | None
     hydration_pct: float
     salt_pct: float
     oil_pct: float
@@ -127,8 +117,6 @@ class GeneratedRecipe(BaseModel):
     ingredients_total: dict
     ingredients_per_ball: dict
     fermentation_schedule: list[dict]
-    style: str
-    style_attribution: StyleAttribution
     warnings: list[str]
 
 
@@ -141,16 +129,6 @@ class PizzaRecipe(GeneratedRecipe):
 class PizzaRecipeList(BaseModel):
     items: list[PizzaRecipe]
     count: int
-
-
-class StyleInfo(BaseModel):
-    style: str
-    technique: str
-    hydration_pct: float
-    salt_pct: float
-    oil_pct: float
-    ball_weight_g: float
-    style_attribution: StyleAttribution
 
 
 class AgentChatRequest(BaseModel):

@@ -1,11 +1,10 @@
 # Pizza Service (AI Agent)
 
-FastAPI microservice that turns a **flour blend** (baker's percentages), a **fermentation
-technique**, and an optional **named style** (each anchored to a real pizza-chef/cookbook
-reference) into a scaled pizza dough recipe: ingredient weights, a preferment/starter
-breakdown where relevant, and a fermentation schedule. Also exposes a built-in AI agent
-endpoint (`/agent/chat`) that can do the same from a natural-language instruction via
-Anthropic tool-calling.
+FastAPI microservice that turns a **flour blend** (baker's percentages) and an optional
+**pre-ferment** (one or more named components, e.g. biga 60% / poolish 40%) into a
+scaled pizza dough recipe: ingredient weights, a preferment breakdown where relevant,
+and a fermentation schedule. Also exposes a built-in AI agent endpoint (`/agent/chat`)
+that can do the same from a natural-language instruction via Anthropic tool-calling.
 
 Extracted from the [`ict_project`](https://github.com/marcomaggiotti/ict_project) monorepo
 as a standalone, self-contained service (own dependencies, Dockerfile, config).
@@ -15,13 +14,16 @@ as a standalone, self-contained service (own dependencies, Dockerfile, config).
 | Method | Path              | Description                                                |
 |--------|-------------------|--------------------------------------------------------------|
 | GET    | `/health`         | Liveness check                                                |
-| GET    | `/recipes/styles` | List the built-in named styles and their chef/book attribution |
 | GET    | `/recipes/flours` | List the international flour catalogue                        |
 | POST   | `/recipes/generate` | Compute a recipe (`?num_balls=N`, default 1) without saving it |
 | POST   | `/recipes`        | Compute the single-ball formula and save it                   |
 | GET    | `/recipes`        | List saved recipes (`limit`, `offset`)                        |
 | GET    | `/recipes/{id}`   | Get one saved recipe (`?num_balls=N`, default 1)               |
 | DELETE | `/recipes/{id}`   | Delete a saved recipe                                          |
+| POST   | `/pre-ferment-types` | Save a reusable named pre-ferment blend (**Postgres-only**) |
+| GET    | `/pre-ferment-types` | List saved pre-ferment blends (**Postgres-only**) |
+| GET    | `/pre-ferment-types/{id}` | Get one saved pre-ferment blend (**Postgres-only**) |
+| DELETE | `/pre-ferment-types/{id}` | Delete a saved pre-ferment blend (**Postgres-only**) |
 | POST   | `/agent/chat`     | Natural-language agent chat over recipe generation/storage    |
 | GET    | `/`               | Browser page - home/nav menu |
 | GET    | `/flour-explorer` | Browser page - filterable thumbnail grid over the flour catalogue |
@@ -49,10 +51,10 @@ Four small, dependency-free HTML/JS pages (no frontend build step, shared stylin
   what's already linked. Warns if flour-service is currently running with an in-memory
   backend (added products would be lost on its next restart).
 - **`/new-recipe`** - build a dough formula (flour blend rows populated from
-  flour-service, technique, style, optional hydration/salt/oil/yeast/preferment
-  overrides) and save it via this service's own `POST /recipes`; shows the computed
-  result and a list of recently saved recipes. Deliberately not at `/recipes/new` -
-  that would collide with `GET /recipes/{item_id}`.
+  flour-service, an optional pre-ferment with one or more named components, optional
+  hydration/salt/oil/yeast overrides) and save it via this service's own `POST /recipes`;
+  shows the computed result and a list of recently saved recipes. Deliberately not at
+  `/recipes/new` - that would collide with `GET /recipes/{item_id}`.
 
 All of them call `flour-service` directly from client-side JS: set `FLOUR_SERVICE_URL`
 to point at a different deployment (default `https://flour-service.onrender.com`), e.g.
@@ -74,9 +76,13 @@ separate, query-time concern (`?num_balls=N` on `/recipes/generate` and
       {"pizza_flours_id": "whole_wheat", "ash%": 1.30, "description": "Whole wheat flour", "percent": 20}
     ]
   },
-  "pre_ferments": [
-    {"type": "sourdough", "percentage": 20}
-  ],
+  "pre_ferment": {
+    "components": [
+      {"name": "biga", "percentage": 60},
+      {"name": "poolish", "percentage": 40}
+    ],
+    "percentage": 35
+  },
   "hydration_pct": 75,
   "salt_pct": 2,
   "oil_pct": 0,
@@ -93,34 +99,48 @@ separate, query-time concern (`?num_balls=N` on `/recipes/generate` and
   range and a mismatch is returned as a (non-fatal) warning rather than rejected.
   `description` is an optional free-text note for the specific brand/product used (e.g.
   `"Semola Caputo"`) - purely informational, not matched against the catalogue.
-- `pre_ferments` - at most one entry, `{"type": "poolish"|"biga"|"sourdough", "percentage": ...}`.
-  `percentage` is the preferment/starter's baker's % of total flour weight (grams of
-  preferment flour, or starter, per 100g of total flour, e.g. the baguette formula's
-  "Poolish 400g / 40%"); defaults to 40 (poolish/biga) or 20 (sourdough) when this entry
-  is omitted entirely. Its `type` becomes the recipe's `technique` unless `technique` is
-  *also* given explicitly (in which case they must match). Omit `pre_ferments` entirely
-  for a plain `direct` dough or one of the other non-preferment techniques below.
-- `technique` - optional when `pre_ferments` has an entry (inferred from its `type`);
-  otherwise one of `direct`, `same_day`, `cold_ferment_24h`, `cold_ferment_48h`,
-  `cold_ferment_72h` (or `poolish`/`biga`/`sourdough` matching `pre_ferments`), defaulting
-  to `direct` if both are omitted. Drives the yeast/preferment math and the generated
-  fermentation schedule.
-- `style` - optional named style key (see `GET /recipes/styles`, or below). Supplies
-  defaults for anything left unset (`hydration_pct`, `salt_pct`, `oil_pct`,
-  `ball_weight_g`) and carries the recipe's book/author attribution. Defaults to
-  `custom` (generic defaults, no attribution).
-- Any of `hydration_pct`, `salt_pct`, `oil_pct`, `yeast_pct`, `ball_weight_g` you *do*
-  set overrides the style default.
+- `pre_ferment` - optional; omit entirely for a plain commercial-yeast dough. When set,
+  it builds ONE aggregate preferment - named components are descriptive/echoed metadata
+  only, never computed separately (so "biga 60% / poolish 40%" produces a single
+  preferment mass, not two separately-computed ones). Either:
+  - `components` - inline named components, e.g.
+    `[{"name": "biga", "percentage": 60}, {"name": "poolish", "percentage": 40}]`
+    (percentages must sum to 100), **or**
+  - `type_id` - references a reusable blend saved via `POST /pre-ferment-types` (see
+    below) instead of describing components inline.
 
-The response echoes `ingredients.flours` back with `grams` added, and `pre_ferments`
-back with the actually-used percentage (override or default) - empty `[]` for
-direct/same_day/cold_ferment_* techniques. It also includes the leavening breakdown
-(commercial yeast %, or a poolish/biga preferment split, or a sourdough starter %, each
-carrying its own `percent_of_flour`) - both scaled to `num_balls` - plus
-`ingredients_per_ball` (a constant single-ball reference, regardless of `num_balls`,
-**not** to be confused with `ingredients.flours` - different things that happen to
-share a name prefix), `ingredients_total` (the full batch), a step-by-step fermentation
-schedule, and the style's attribution.
+  Set exactly one of `components`/`type_id`. `percentage` is the preferment's baker's %
+  of total flour weight (grams of preferment flour per 100g of total flour, e.g. the
+  baguette formula's "Poolish 400g / 40%"); defaults to 40 when omitted.
+- Any of `hydration_pct`, `salt_pct`, `oil_pct`, `yeast_pct`, `ball_weight_g` left unset
+  falls back to a generic baker's-percentage default (62% hydration, 2.5% salt, 0% oil,
+  250g ball weight).
+
+The response echoes `ingredients.flours` back with `grams` added, and `pre_ferment`
+back with the actually-used percentage (override or default) and resolved components -
+`null` when no pre-ferment was set. It also includes the leavening breakdown (commercial
+yeast %, or an aggregate preferment split with its `percent_of_flour`) - scaled to
+`num_balls` - plus `ingredients_per_ball` (a constant single-ball reference, regardless
+of `num_balls`, **not** to be confused with `ingredients.flours` - different things that
+happen to share a name prefix), `ingredients_total` (the full batch), and a step-by-step
+fermentation schedule.
+
+### Pre-ferment types (Postgres-only)
+
+`pre_ferment_types` is a small reference table of reusable named blends a recipe's
+`pre_ferment.type_id` can point at instead of describing `components` inline - e.g. save
+`biga80_sourdough20` once, then reuse it across recipes. It's **only available when
+`DB_BACKEND=postgres`**; the other endpoints (`/recipes/*`) work on any backend
+regardless. On sqlite/cosmos, `/pre-ferment-types` requests return `400` explaining that
+Postgres is required.
+
+```json
+// POST /pre-ferment-types
+{"id": "biga80_sourdough20", "preferments": [{"name": "biga", "percentage": 80}, {"name": "sourdough", "percentage": 20}]}
+```
+
+A row is deliberately just `id` + `preferments` (name/percentage pairs) - no technique,
+hydration, or resting-hours columns; those stay recipe-level concerns.
 
 ### International flour catalogue
 
@@ -153,41 +173,17 @@ present.
 This catalogue is seed data (`app/flours.py`'s `FLOUR_CATALOG`). When `DB_BACKEND=cosmos`,
 it lives in its own Cosmos container (`COSMOS_FLOURS_CONTAINER`, default `pizza_flours`)
 instead of hardcoded in the source, seeded automatically the first time that container
-is empty - same pattern as the style library below. Non-Cosmos backends (`sqlite`/
-`postgres`, and the test suite) serve the seed data directly from memory. **A container
-seeded before the ash fields existed won't pick them up on its own** (seeding only runs
-against an empty container) - run `python scripts/backfill_flour_ash.py` against it once
-to patch `ash_min_pct`/`ash_max_pct` into the existing documents in place, or delete the
-container and let the app recreate/reseed it from scratch (see below).
+is empty. Non-Cosmos backends (`sqlite`/`postgres`, and the test suite) serve the seed
+data directly from memory. **A container seeded before the ash fields existed won't pick
+them up on its own** (seeding only runs against an empty container) - run
+`python scripts/backfill_flour_ash.py` against it once to patch `ash_min_pct`/
+`ash_max_pct` into the existing documents in place, or delete the container and let the
+app recreate/reseed it from scratch (see below).
 
-The `pizza_recipes`/`pizza_styles`/`pizza_flours` containers (and their non-Cosmos
-equivalents) are built eagerly in `app/main.py`'s startup hook, not lazily on first
-request - so a deploy alone is what creates/reseeds them (e.g. if a container was
-deleted out-of-band), without needing a request to hit a specific endpoint first.
-
-### Built-in styles (pizza-chef / cookbook references)
-
-| Key | Style | Author | Book / reference |
-|-----|-------|--------|-------------------|
-| `neapolitan_avpn` | Neapolitan | Associazione Verace Pizza Napoletana (AVPN) | AVPN Disciplinare |
-| `ny_style` | New York style | Tony Gemignani | The Pizza Bible |
-| `detroit_style` | Detroit style (pan) | Ken Forkish | The Elements of Pizza |
-| `roman_al_taglio` | Roman-style al taglio | Gabriele Bonci | Pizza: Seasonal Recipes from Rome's Legendary Pizzarium |
-| `sourdough_fwsy` | Naturally leavened | Ken Forkish | Flour Water Salt Yeast |
-| `american_pie_reinhart` | American artisan | Peter Reinhart | American Pie: My Search for the Perfect Pizza |
-| `modernist_pizza` | Precision baker's-% formula | Nathan Myhrvold et al. | Modernist Pizza |
-| `custom` | Custom formulation | - | - (generic defaults, override freely) |
-
-This table is seed data (`app/recipe.py`'s `STYLE_LIBRARY`). When `DB_BACKEND=cosmos`,
-the styles live in their own Cosmos container (`COSMOS_STYLES_CONTAINER`, default
-`pizza_styles`) instead of hardcoded in the source - the seed data is written there
-automatically the first time the container is empty, and `GET /recipes/styles` /
-`/recipes/generate` read from Cosmos afterwards. That means you can add, edit, or
-remove styles directly in Cosmos (each document's `id` is the style key, e.g.
-`neapolitan_avpn`, with `label`/`author`/`book`/`hydration_pct`/`salt_pct`/`oil_pct`/
-`technique`/`ball_weight_g`/`suggested_flours`/`notes` fields) without a code change or
-redeploy. Non-Cosmos backends (`sqlite`/`postgres`, and the test suite) just serve the
-seed data directly from memory.
+The `pizza_recipes`/`pizza_flours` containers (and their non-Cosmos equivalents) are
+built eagerly in `app/main.py`'s startup hook, not lazily on first request - so a deploy
+alone is what creates/reseeds them (e.g. if a container was deleted out-of-band),
+without needing a request to hit a specific endpoint first.
 
 ## Configuration
 
@@ -196,7 +192,8 @@ Copy `.env.example` to `.env` and adjust. Key setting: `DB_BACKEND`:
 - `sqlite` (default) - zero-config local file DB, good for quick local runs.
 - `postgres` - any Postgres-wire-compatible database, including a **Render**
   [managed Postgres](https://render.com/pricing#postgresql) instance - just set
-  `POSTGRES_URL` to Render's external connection string.
+  `POSTGRES_URL` to Render's external connection string. Required for
+  `/pre-ferment-types` (see above) - that table is Postgres-only, unlike everything else.
 - `cosmos` - **Azure Cosmos DB** (NoSQL API) - set `COSMOS_ENDPOINT` and `COSMOS_KEY`
   from an existing Cosmos account; `COSMOS_DATABASE`/`COSMOS_CONTAINER` are
   auto-created if missing.

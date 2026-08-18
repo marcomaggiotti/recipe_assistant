@@ -2,8 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.recipe import STYLE_LIBRARY, TECHNIQUES, compute_recipe, scale_recipe
-from app.schemas import GeneratedRecipe, StyleAttribution, StyleInfo
+from app.recipe import DEFAULT_HYDRATION_PCT, compute_recipe, scale_recipe
 
 client = TestClient(app)
 
@@ -12,12 +11,12 @@ client = TestClient(app)
 SOFT_WHEAT_00 = "soft_wheat_00"
 WHOLE_WHEAT = "whole_wheat"
 
+BIGA_POOLISH = {"components": [{"name": "biga", "percentage": 60}, {"name": "poolish", "percentage": 40}], "percentage": 40}
+
 
 def test_compute_recipe_is_a_single_ball_baseline():
     result = compute_recipe(
         flours=[{"type": "00 flour", "percent": 80}, {"type": "Whole wheat", "percent": 20}],
-        technique="direct",
-        style="custom",
         ball_weight_g=250,
     )
     assert "num_balls" not in result
@@ -27,20 +26,18 @@ def test_compute_recipe_is_a_single_ball_baseline():
     assert dough_sum == pytest.approx(250.0, rel=0.01)
     assert sum(f["percent"] for f in result["ingredients"]["flours"]) == pytest.approx(100.0)
     assert result["leavening"]["type"] == "instant dry yeast"
-    assert result["pre_ferments"] == []
+    assert result["pre_ferment"] is None
 
 
 def test_scale_recipe_expands_to_a_batch():
-    base = compute_recipe(
-        flours=[{"type": "00 flour", "percent": 100}], technique="direct", ball_weight_g=250,
-    )
+    base = compute_recipe(flours=[{"type": "00 flour", "percent": 100}], ball_weight_g=250)
     scaled = scale_recipe(base, 4)
     assert scaled["num_balls"] == 4
     assert scaled["total_dough_g"] == pytest.approx(1000.0)
     assert scaled["ingredients_total"]["flour_g"] == pytest.approx(base["ingredients_per_ball"]["flour_g"] * 4, abs=0.1)
     # per-ball reference stays the same regardless of batch size
     assert scaled["ingredients_per_ball"] == base["ingredients_per_ball"]
-    # percentages/technique/schedule/attribution are unaffected by batch size
+    # percentages/schedule are unaffected by batch size
     assert scaled["ingredients"]["flours"][0]["percent"] == base["ingredients"]["flours"][0]["percent"]
     assert scaled["ingredients"]["flours"][0]["grams"] == pytest.approx(base["ingredients"]["flours"][0]["grams"] * 4, abs=0.1)
     assert scaled["fermentation_schedule"] == base["fermentation_schedule"]
@@ -48,16 +45,17 @@ def test_scale_recipe_expands_to_a_batch():
 
 def test_scale_recipe_scales_preferment_leavening_grams():
     base = compute_recipe(
-        flours=[{"type": "Bread flour", "percent": 100}], technique="poolish",
+        flours=[{"type": "Bread flour", "percent": 100}], pre_ferment=BIGA_POOLISH,
         hydration_pct=65, ball_weight_g=280,
     )
     scaled = scale_recipe(base, 3)
     assert scaled["leavening"]["preferment_flour_g"] == pytest.approx(base["leavening"]["preferment_flour_g"] * 3, abs=0.1)
     assert scaled["leavening"]["rest_hours"] == base["leavening"]["rest_hours"]  # text, unaffected
+    assert scaled["leavening"]["components"] == base["leavening"]["components"]  # metadata, unaffected
 
 
 def test_scale_recipe_rejects_non_positive_num_balls():
-    base = compute_recipe(flours=[{"type": "00 flour", "percent": 100}], technique="direct")
+    base = compute_recipe(flours=[{"type": "00 flour", "percent": 100}])
     with pytest.raises(ValueError):
         scale_recipe(base, 0)
 
@@ -65,123 +63,62 @@ def test_scale_recipe_rejects_non_positive_num_balls():
 def test_flour_percentages_are_normalized_with_warning():
     result = compute_recipe(
         flours=[{"type": "00 flour", "percent": 70}, {"type": "Semola", "percent": 50}],
-        technique="direct",
         ball_weight_g=250,
     )
     assert sum(f["percent"] for f in result["ingredients"]["flours"]) == pytest.approx(100.0)
     assert any("normalized" in w for w in result["warnings"])
 
 
-def test_style_defaults_apply_when_unset():
+def test_defaults_apply_when_unset():
+    result = compute_recipe(flours=[{"type": "00 flour", "percent": 100}])
+    assert result["hydration_pct"] == DEFAULT_HYDRATION_PCT
+
+
+def test_pre_ferment_builds_a_preferment_with_default_percentage():
     result = compute_recipe(
-        flours=[{"type": "00 flour", "percent": 100}],
-        technique="direct",
-        style="neapolitan_avpn",
+        flours=[{"type": "Bread flour", "percent": 100}],
+        pre_ferment={"components": [{"name": "poolish", "percentage": 100}], "percentage": 40},
+        hydration_pct=65,
+        ball_weight_g=280,
     )
-    style = STYLE_LIBRARY["neapolitan_avpn"]
-    assert result["hydration_pct"] == style["hydration_pct"]
-    assert result["style_attribution"]["author"] == style["author"]
-    assert result["style_attribution"]["book"] == style["book"]
+    assert result["leavening"]["type"] == "preferment"
+    assert result["leavening"]["preferment_flour_g"] > 0
+    assert result["leavening"]["percent_of_flour"] == 40.0
+    assert result["pre_ferment"] == {"components": [{"name": "poolish", "percentage": 100}], "percentage": 40.0}
 
 
-def test_preferment_techniques_build_a_preferment():
-    for technique in ("poolish", "biga"):
-        result = compute_recipe(
-            flours=[{"type": "Bread flour", "percent": 100}],
-            technique=technique,
-            hydration_pct=65,
-            ball_weight_g=280,
-        )
-        assert result["leavening"]["type"] == technique
-        assert result["leavening"]["preferment_flour_g"] > 0
-        assert result["leavening"]["percent_of_flour"] == 40.0  # default when unset
-        assert result["pre_ferments"] == [{"type": technique, "percentage": 40.0}]
-
-
-def test_pre_ferment_percentage_overrides_the_default_and_scales_preferment_flour():
+def test_pre_ferment_with_multiple_named_components_is_not_split_per_component():
     result = compute_recipe(
         flours=[{"type": "Bread flour", "percent": 65}, {"type": "00 flour", "percent": 35}],
-        technique="poolish",
-        pre_ferment_percentage=40,
+        pre_ferment=BIGA_POOLISH,
         hydration_pct=76,
         ball_weight_g=1000,
     )
     leavening = result["leavening"]
     assert leavening["percent_of_flour"] == 40
+    assert leavening["components"] == BIGA_POOLISH["components"]
+    # one aggregate preferment mass, not one per component
     assert leavening["preferment_flour_g"] == pytest.approx(
         result["ingredients_per_ball"]["flour_g"] * 0.40, abs=0.1
     )
-    assert result["pre_ferments"] == [{"type": "poolish", "percentage": 40}]
+    assert result["pre_ferment"] == {"components": BIGA_POOLISH["components"], "percentage": 40}
 
 
-def test_biga_percentage_overrides_the_default():
+def test_pre_ferment_percentage_overrides_the_default():
     result = compute_recipe(
         flours=[{"type": "Bread flour", "percent": 100}],
-        technique="biga",
-        pre_ferment_percentage=55,
+        pre_ferment={"components": [{"name": "biga", "percentage": 100}], "percentage": 55},
         hydration_pct=65,
         ball_weight_g=280,
     )
     assert result["leavening"]["percent_of_flour"] == 55
-    assert result["pre_ferments"] == [{"type": "biga", "percentage": 55}]
+    assert result["pre_ferment"]["percentage"] == 55
 
 
-def test_sourdough_percentage_overrides_the_default():
-    result = compute_recipe(
-        flours=[{"type": "Bread flour", "percent": 100}],
-        technique="sourdough",
-        pre_ferment_percentage=25,
-        hydration_pct=68,
-        ball_weight_g=260,
-    )
-    assert result["leavening"]["percent_of_flour"] == 25
-    assert result["leavening"]["grams"] == pytest.approx(
-        result["ingredients_per_ball"]["flour_g"] * 0.25, abs=0.1
-    )
-    assert result["pre_ferments"] == [{"type": "sourdough", "percentage": 25}]
-
-
-def test_non_preferment_techniques_report_no_pre_ferments():
-    for technique in ("direct", "same_day", "cold_ferment_24h", "cold_ferment_48h", "cold_ferment_72h"):
-        result = compute_recipe(
-            flours=[{"type": "00 flour", "percent": 100}], technique=technique,
-            # a pre_ferment_percentage override is simply ignored for non-preferment techniques
-            pre_ferment_percentage=99,
-        )
-        assert result["pre_ferments"] == []
-
-
-def test_unknown_technique_rejected():
-    with pytest.raises(ValueError):
-        compute_recipe(flours=[{"type": "00 flour", "percent": 100}], technique="bogus")
-
-
-def test_explicit_style_defaults_override_style_library():
-    custom_style = {
-        "label": "Injected style", "author": "Someone", "book": "Some Book",
-        "hydration_pct": 70.0, "salt_pct": 3.0, "oil_pct": 0.0,
-        "technique": "direct", "ball_weight_g": 260.0,
-        "suggested_flours": [], "notes": "from an external store",
-    }
-    result = compute_recipe(
-        flours=[{"type": "00 flour", "percent": 100}],
-        technique="direct",
-        style="not_in_style_library",
-        style_defaults=custom_style,
-    )
-    assert result["hydration_pct"] == 70.0
-    assert result["style"] == "not_in_style_library"
-    assert result["style_attribution"]["author"] == "Someone"
-
-
-def test_all_styles_generate_without_error():
-    for style in STYLE_LIBRARY:
-        result = compute_recipe(
-            flours=[{"type": "00 flour", "percent": 100}],
-            technique=STYLE_LIBRARY[style]["technique"],
-            style=style,
-        )
-        assert result["style"] == style
+def test_no_pre_ferment_reports_none():
+    result = compute_recipe(flours=[{"type": "00 flour", "percent": 100}])
+    assert result["pre_ferment"] is None
+    assert result["leavening"]["type"] == "instant dry yeast"
 
 
 def test_api_generate_endpoint():
@@ -192,15 +129,14 @@ def test_api_generate_endpoint():
             "ingredients": {
                 "flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 90}, {"pizza_flours_id": WHOLE_WHEAT, "percent": 10}],
             },
-            "technique": "cold_ferment_48h",
-            "style": "ny_style",
+            "hydration_pct": 63,
         },
     )
     assert response.status_code == 200
     body = response.json()
     assert body["num_balls"] == 3
     assert body["ingredients_per_ball"]["flour_g"] == pytest.approx(body["ingredients_total"]["flour_g"] / 3, abs=0.1)
-    assert body["style_attribution"]["author"] == "Tony Gemignani"
+    assert body["hydration_pct"] == 63
 
 
 def test_api_generate_passes_through_brand_description():
@@ -213,7 +149,6 @@ def test_api_generate_passes_through_brand_description():
                     {"pizza_flours_id": SOFT_WHEAT_00, "description": "Naturaplan Bio CH Weissmehl Coop", "percent": 30},
                 ],
             },
-            "technique": "direct",
         },
     )
     assert response.status_code == 200
@@ -225,7 +160,7 @@ def test_api_generate_passes_through_brand_description():
 def test_api_generate_omits_description_when_unset():
     response = client.post(
         "/recipes/generate",
-        json={"ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}]}, "technique": "direct"},
+        json={"ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}]}},
     )
     assert response.status_code == 200
     assert response.json()["ingredients"]["flours"][0]["description"] is None
@@ -234,7 +169,7 @@ def test_api_generate_omits_description_when_unset():
 def test_api_generate_defaults_to_one_ball():
     response = client.post(
         "/recipes/generate",
-        json={"ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}]}, "technique": "direct"},
+        json={"ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}]}},
     )
     assert response.status_code == 200
     body = response.json()
@@ -242,51 +177,74 @@ def test_api_generate_defaults_to_one_ball():
     assert body["total_dough_g"] == pytest.approx(body["ball_weight_g"])
 
 
-def test_api_generate_defaults_technique_to_direct_when_omitted():
+def test_api_generate_defaults_to_no_pre_ferment_when_omitted():
     response = client.post(
         "/recipes/generate",
         json={"ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}]}},
     )
     assert response.status_code == 200
-    assert response.json()["technique"] == "direct"
+    assert response.json()["pre_ferment"] is None
 
 
-def test_api_generate_infers_technique_from_pre_ferments():
+def test_api_generate_accepts_multiple_named_pre_ferment_components():
     response = client.post(
         "/recipes/generate",
         json={
             "ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}]},
-            "pre_ferments": [{"type": "sourdough", "percentage": 20}],
+            "pre_ferment": {
+                "components": [{"name": "biga", "percentage": 60}, {"name": "poolish", "percentage": 40}],
+                "percentage": 35,
+            },
         },
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["technique"] == "sourdough"
-    assert body["pre_ferments"] == [{"type": "sourdough", "percentage": 20}]
-    assert body["leavening"]["percent_of_flour"] == 20
+    assert body["pre_ferment"]["components"] == [{"name": "biga", "percentage": 60}, {"name": "poolish", "percentage": 40}]
+    assert body["leavening"]["percent_of_flour"] == 35
 
 
-def test_api_generate_rejects_mismatched_technique_and_pre_ferments():
+def test_api_generate_rejects_components_not_summing_to_100():
     response = client.post(
         "/recipes/generate",
         json={
             "ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}]},
-            "technique": "poolish",
-            "pre_ferments": [{"type": "sourdough", "percentage": 20}],
+            "pre_ferment": {"components": [{"name": "biga", "percentage": 60}, {"name": "poolish", "percentage": 30}]},
         },
     )
     assert response.status_code == 422
 
 
-def test_api_generate_rejects_more_than_one_pre_ferment():
+def test_api_generate_rejects_setting_both_type_id_and_components():
     response = client.post(
         "/recipes/generate",
         json={
             "ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}]},
-            "pre_ferments": [{"type": "poolish", "percentage": 40}, {"type": "biga", "percentage": 40}],
+            "pre_ferment": {"type_id": "biga100", "components": [{"name": "biga", "percentage": 100}]},
         },
     )
     assert response.status_code == 422
+
+
+def test_api_generate_rejects_setting_neither_type_id_nor_components():
+    response = client.post(
+        "/recipes/generate",
+        json={
+            "ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}]},
+            "pre_ferment": {"percentage": 40},
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_api_generate_rejects_unknown_pre_ferment_type_id():
+    response = client.post(
+        "/recipes/generate",
+        json={
+            "ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}]},
+            "pre_ferment": {"type_id": "does_not_exist"},
+        },
+    )
+    assert response.status_code == 400
 
 
 def test_api_save_list_get_delete_roundtrip():
@@ -295,7 +253,6 @@ def test_api_save_list_get_delete_roundtrip():
         json={
             "name": "Friday night pizza",
             "ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}]},
-            "technique": "direct",
         },
     )
     assert create.status_code == 200
@@ -326,51 +283,19 @@ def test_api_save_list_get_delete_roundtrip():
     assert missing.status_code == 404
 
 
-def test_api_styles_endpoint_lists_all():
-    response = client.get("/recipes/styles")
+def test_api_save_recipe_without_a_name_defaults_from_pre_ferment():
+    response = client.post(
+        "/recipes",
+        json={"ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}]}},
+    )
     assert response.status_code == 200
-    body = response.json()
-    keys = {s["style"] for s in body}
-    assert keys == set(STYLE_LIBRARY)
-    sample = next(s for s in body if s["style"] == "neapolitan_avpn")
-    assert sample["style_attribution"]["author"] == "Associazione Verace Pizza Napoletana (AVPN)"
-
-
-def test_style_info_shares_field_names_with_generated_recipe():
-    # StyleInfo should use the same "style"/"style_attribution" naming and the same
-    # recipe-default field names (technique, hydration_pct, ...) as GeneratedRecipe,
-    # rather than a flattened/renamed ("key" instead of "style") shape of its own.
-    shared_fields = {"style", "technique", "hydration_pct", "salt_pct", "oil_pct", "ball_weight_g", "style_attribution"}
-    assert shared_fields <= set(StyleInfo.model_fields)
-    assert shared_fields <= set(GeneratedRecipe.model_fields)
-    assert StyleInfo.model_fields["style_attribution"].annotation is StyleAttribution
-    assert GeneratedRecipe.model_fields["style_attribution"].annotation is StyleAttribution
-
-
-def test_api_rejects_bad_technique():
-    response = client.post(
-        "/recipes/generate",
-        json={"ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}]}, "technique": "invalid"},
-    )
-    assert response.status_code == 422
-
-
-def test_api_rejects_unknown_style():
-    response = client.post(
-        "/recipes/generate",
-        json={
-            "ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}]},
-            "technique": "direct",
-            "style": "does_not_exist",
-        },
-    )
-    assert response.status_code == 400
+    assert response.json()["name"] == "Direct dough"
 
 
 def test_api_rejects_unknown_flour():
     response = client.post(
         "/recipes/generate",
-        json={"ingredients": {"flours": [{"pizza_flours_id": "moon dust", "percent": 100}]}, "technique": "direct"},
+        json={"ingredients": {"flours": [{"pizza_flours_id": "moon dust", "percent": 100}]}},
     )
     assert response.status_code == 400
     assert "unknown flour type" in response.json()["detail"]
@@ -396,7 +321,7 @@ def test_api_flours_endpoint_exposes_ash_content():
 def test_api_generate_accepts_matching_ash_pct_without_warning():
     response = client.post(
         "/recipes/generate",
-        json={"ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "ash%": 0.50, "percent": 100}]}, "technique": "direct"},
+        json={"ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "ash%": 0.50, "percent": 100}]}},
     )
     assert response.status_code == 200
     assert not any("ash%" in w for w in response.json()["warnings"])
@@ -405,45 +330,7 @@ def test_api_generate_accepts_matching_ash_pct_without_warning():
 def test_api_generate_warns_on_mismatched_ash_pct():
     response = client.post(
         "/recipes/generate",
-        json={"ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "ash%": 1.50, "percent": 100}]}, "technique": "direct"},
+        json={"ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "ash%": 1.50, "percent": 100}]}},
     )
     assert response.status_code == 200
     assert any("ash%" in w for w in response.json()["warnings"])
-
-
-def test_api_generate_accepts_pre_ferments_poolish():
-    response = client.post(
-        "/recipes/generate",
-        json={
-            "ingredients": {
-                "flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 65}, {"pizza_flours_id": WHOLE_WHEAT, "percent": 35}],
-            },
-            "pre_ferments": [{"type": "poolish", "percentage": 40}],
-            "hydration_pct": 76,
-            "ball_weight_g": 1000,
-        },
-    )
-    assert response.status_code == 200
-    assert response.json()["leavening"]["percent_of_flour"] == 40
-
-
-def test_api_generate_accepts_pre_ferments_biga_and_sourdough():
-    biga = client.post(
-        "/recipes/generate",
-        json={
-            "ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}]},
-            "pre_ferments": [{"type": "biga", "percentage": 55}],
-        },
-    )
-    assert biga.status_code == 200
-    assert biga.json()["leavening"]["percent_of_flour"] == 55
-
-    sourdough = client.post(
-        "/recipes/generate",
-        json={
-            "ingredients": {"flours": [{"pizza_flours_id": SOFT_WHEAT_00, "percent": 100}]},
-            "pre_ferments": [{"type": "sourdough", "percentage": 25}],
-        },
-    )
-    assert sourdough.status_code == 200
-    assert sourdough.json()["leavening"]["percent_of_flour"] == 25

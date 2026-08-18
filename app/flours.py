@@ -25,8 +25,8 @@ entry's is the flour type's own descriptive note).
 
 FLOUR_CATALOG is seed data. When DB_BACKEND=cosmos, it's written into its own Cosmos
 container (COSMOS_FLOURS_CONTAINER, default "pizza_flours") on first use and served
-from there afterwards - mirrors styles.py's StyleStore. Non-Cosmos backends (local
-dev, tests) just serve the seed data directly. A container seeded before the ash
+from there afterwards. Non-Cosmos backends (local dev, tests) just serve the seed data
+directly. A container seeded before the ash
 fields (or pizza_flours_id/description) were added won't pick them up automatically
 (seeding only runs when the container is empty) - see scripts/backfill_flour_ash.py
 and scripts/backfill_flour_pizza_flours_id.py to update it in place.
