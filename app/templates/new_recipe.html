@@ -16,7 +16,7 @@
 <div class="wrap">
   <header class="page-head">
     <h1>New Recipe</h1>
-    <p class="subtitle">Build a dough formula (pizza or bread - the technique/style below is what shapes it) from a flour blend, and save it.</p>
+    <p class="subtitle">Build a dough formula (pizza or bread) from a flour blend and an optional pre-ferment, and save it.</p>
     <p class="source-note">Flour options from <a href="__FLOUR_SERVICE_URL__/docs" target="_blank" rel="noopener">flour-service</a>; saved via this service's own <code>POST /recipes</code>.</p>
   </header>
 
@@ -26,25 +26,8 @@
       <input id="f-name" type="text" placeholder="e.g. Sunday country loaf">
     </div>
     <div class="field">
-      <label for="f-style">Style</label>
-      <select id="f-style"><option value="custom">Custom</option></select>
-    </div>
-    <div class="field">
-      <label for="f-technique">Technique</label>
-      <select id="f-technique">
-        <option value="direct">Direct</option>
-        <option value="same_day">Same day</option>
-        <option value="poolish">Poolish preferment</option>
-        <option value="biga">Biga preferment</option>
-        <option value="sourdough">Sourdough</option>
-        <option value="cold_ferment_24h">Cold ferment 24h</option>
-        <option value="cold_ferment_48h">Cold ferment 48h</option>
-        <option value="cold_ferment_72h">Cold ferment 72h</option>
-      </select>
-    </div>
-    <div class="field">
       <label for="f-ballweight">Ball weight (g, optional)</label>
-      <input id="f-ballweight" type="number" min="1" step="1" placeholder="style default">
+      <input id="f-ballweight" type="number" min="1" step="1" placeholder="250">
     </div>
 
     <div class="field wide">
@@ -53,16 +36,35 @@
       <button type="button" id="add-row-btn" style="align-self:flex-start;">+ Add flour</button>
     </div>
 
+    <div class="field wide">
+      <label><input type="checkbox" id="f-use-preferment"> Build a pre-ferment</label>
+    </div>
+
+    <div id="preferment-panel" style="display:none;" class="field wide">
+      <div class="field">
+        <label for="f-preferment-source">Pre-ferment source</label>
+        <select id="f-preferment-source">
+          <option value="inline">Inline components (e.g. biga 60% / poolish 40%)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="f-preferment-pct">Pre-ferment % of total flour</label>
+        <input id="f-preferment-pct" type="number" min="0" max="100" step="1" placeholder="40">
+      </div>
+      <div id="preferment-inline-fields" class="field wide">
+        <label>Named components (percentages must sum to 100)</label>
+        <div id="preferment-rows"></div>
+        <button type="button" id="add-preferment-row-btn" style="align-self:flex-start;">+ Add component</button>
+      </div>
+    </div>
+
     <details class="advanced">
       <summary>Advanced overrides &amp; API key</summary>
       <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px 16px; margin-top:10px;">
-        <div class="field"><label for="f-hydration">Hydration % (optional)</label><input id="f-hydration" type="number" step="0.1" placeholder="style default"></div>
-        <div class="field"><label for="f-salt">Salt % (optional)</label><input id="f-salt" type="number" step="0.1" placeholder="style default"></div>
-        <div class="field"><label for="f-oil">Oil % (optional)</label><input id="f-oil" type="number" step="0.1" placeholder="style default"></div>
-        <div class="field"><label for="f-yeast">Yeast % (optional)</label><input id="f-yeast" type="number" step="0.01" placeholder="technique default"></div>
-        <div class="field"><label for="f-poolish">Poolish % (optional)</label><input id="f-poolish" type="number" step="1" placeholder="40"></div>
-        <div class="field"><label for="f-biga">Biga % (optional)</label><input id="f-biga" type="number" step="1" placeholder="40"></div>
-        <div class="field"><label for="f-sourdough">Sourdough starter % (optional)</label><input id="f-sourdough" type="number" step="1" placeholder="20"></div>
+        <div class="field"><label for="f-hydration">Hydration % (optional)</label><input id="f-hydration" type="number" step="0.1" placeholder="62"></div>
+        <div class="field"><label for="f-salt">Salt % (optional)</label><input id="f-salt" type="number" step="0.1" placeholder="2.5"></div>
+        <div class="field"><label for="f-oil">Oil % (optional)</label><input id="f-oil" type="number" step="0.1" placeholder="0"></div>
+        <div class="field"><label for="f-yeast">Yeast % (optional)</label><input id="f-yeast" type="number" step="0.01" placeholder="default"></div>
         <div class="field"><label for="f-apikey">API key (only if this service requires one)</label><input id="f-apikey" type="password" autocomplete="off" placeholder="X-API-Key"></div>
       </div>
     </details>
@@ -83,24 +85,26 @@
 <script>
 (function () {
   const FLOUR_SERVICE_BASE = "__FLOUR_SERVICE_URL__";
-  let styleDefaults = {};
   let blendRowCount = 0;
+  let prefermentRowCount = 0;
 
   const els = {
     form: document.getElementById("recipe-form"),
     name: document.getElementById("f-name"),
-    style: document.getElementById("f-style"),
-    technique: document.getElementById("f-technique"),
     ballWeight: document.getElementById("f-ballweight"),
     blendRows: document.getElementById("blend-rows"),
     addRowBtn: document.getElementById("add-row-btn"),
+    usePreferment: document.getElementById("f-use-preferment"),
+    prefermentPanel: document.getElementById("preferment-panel"),
+    prefermentSource: document.getElementById("f-preferment-source"),
+    prefermentPct: document.getElementById("f-preferment-pct"),
+    prefermentInlineFields: document.getElementById("preferment-inline-fields"),
+    prefermentRows: document.getElementById("preferment-rows"),
+    addPrefermentRowBtn: document.getElementById("add-preferment-row-btn"),
     hydration: document.getElementById("f-hydration"),
     salt: document.getElementById("f-salt"),
     oil: document.getElementById("f-oil"),
     yeast: document.getElementById("f-yeast"),
-    poolish: document.getElementById("f-poolish"),
-    biga: document.getElementById("f-biga"),
-    sourdough: document.getElementById("f-sourdough"),
     apikey: document.getElementById("f-apikey"),
     status: document.getElementById("status"),
     result: document.getElementById("result"),
@@ -136,10 +140,8 @@
 
   function addBlendRow(flourOptions) {
     blendRowCount += 1;
-    const rowId = "row" + blendRowCount;
     const row = document.createElement("div");
     row.className = "blend-row";
-    row.dataset.rowId = rowId;
     const select = document.createElement("select");
     select.innerHTML = flourOptions;
     select.required = true;
@@ -169,6 +171,37 @@
     els.blendRows.appendChild(row);
   }
 
+  function addPrefermentRow(name, percentage) {
+    prefermentRowCount += 1;
+    const row = document.createElement("div");
+    row.className = "blend-row";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text"; nameInput.required = true; nameInput.placeholder = "e.g. biga";
+    nameInput.value = name || "";
+    const percentInput = document.createElement("input");
+    percentInput.type = "number"; percentInput.step = "1"; percentInput.min = "0"; percentInput.max = "100"; percentInput.required = true;
+    percentInput.placeholder = "%";
+    percentInput.value = percentage !== undefined ? percentage : "";
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button"; removeBtn.textContent = "Remove";
+    removeBtn.addEventListener("click", () => row.remove());
+
+    const wrapField = (labelText, input) => {
+      const field = document.createElement("div");
+      field.className = "field";
+      const label = document.createElement("label");
+      label.textContent = labelText;
+      field.appendChild(label);
+      field.appendChild(input);
+      return field;
+    };
+
+    row.appendChild(wrapField("Component name", nameInput));
+    row.appendChild(wrapField("% of preferment", percentInput));
+    row.appendChild(removeBtn);
+    els.prefermentRows.appendChild(row);
+  }
+
   async function loadFlourOptions() {
     const data = await flourServiceFetch("/flours");
     const sorted = [...data.items].sort((a, b) => (a.names?.en || a.id).localeCompare(b.names?.en || b.id));
@@ -177,22 +210,26 @@
     addBlendRow(options);
   }
 
-  async function loadStyles() {
-    const styles = await ownFetch("/recipes/styles");
-    els.style.innerHTML = "";
-    for (const s of styles) {
-      styleDefaults[s.style] = s;
-      const opt = document.createElement("option");
-      opt.value = s.style;
-      opt.textContent = s.style_attribution.label;
-      els.style.appendChild(opt);
+  async function loadPreFermentTypes() {
+    try {
+      const data = await ownFetch("/pre-ferment-types");
+      for (const item of data.items) {
+        const opt = document.createElement("option");
+        opt.value = item.id;
+        opt.textContent = item.id + " (" + item.preferments.map((p) => p.name + " " + p.percentage + "%").join(" / ") + ")";
+        els.prefermentSource.appendChild(opt);
+      }
+    } catch (e) {
+      // pre-ferment-types requires DB_BACKEND=postgres - just skip saved blends if unavailable.
     }
-    els.style.value = "custom";
   }
 
-  els.style.addEventListener("change", () => {
-    const s = styleDefaults[els.style.value];
-    if (s) els.technique.value = s.technique;
+  els.usePreferment.addEventListener("change", () => {
+    els.prefermentPanel.style.display = els.usePreferment.checked ? "" : "none";
+  });
+
+  els.prefermentSource.addEventListener("change", () => {
+    els.prefermentInlineFields.style.display = els.prefermentSource.value === "inline" ? "" : "none";
   });
 
   els.addRowBtn.addEventListener("click", async () => {
@@ -205,6 +242,8 @@
       setStatus(els.status, "Couldn't reach flour-service: " + e.message, "error");
     }
   });
+
+  els.addPrefermentRowBtn.addEventListener("click", () => addPrefermentRow());
 
   function numOrUndefined(input) {
     const v = input.value.trim();
@@ -222,12 +261,35 @@
     });
   }
 
+  function collectPreFerment() {
+    if (!els.usePreferment.checked) return undefined;
+    const preFerment = {};
+    const pct = numOrUndefined(els.prefermentPct);
+    if (pct !== undefined) preFerment.percentage = pct;
+    if (els.prefermentSource.value === "inline") {
+      const rows = Array.from(els.prefermentRows.querySelectorAll(".blend-row"));
+      preFerment.components = rows.map((row) => {
+        const [nameField, percentField] = row.querySelectorAll("input");
+        return { name: nameField.value.trim(), percentage: parseFloat(percentField.value) };
+      });
+    } else {
+      preFerment.type_id = els.prefermentSource.value;
+    }
+    return preFerment;
+  }
+
+  function describePreFerment(preFerment) {
+    if (!preFerment) return "Direct dough (no pre-ferment)";
+    const blend = preFerment.components.map((c) => c.name + " " + c.percentage + "%").join(" / ");
+    return blend + " preferment, " + preFerment.percentage + "% of total flour";
+  }
+
   function renderResult(recipe) {
     els.result.style.display = "block";
     const flourLines = recipe.ingredients.flours.map((f) => "<li>" + f.pizza_flours_id + " - " + f.percent + "% (" + f.grams + "g)</li>").join("");
     els.result.innerHTML =
-      "<h2 style='margin-top:0;font-size:1.05rem;'>Saved: " + (recipe.name || recipe.style_attribution.label) + "</h2>" +
-      "<p class='meta-line'>" + recipe.technique + " · " + recipe.style_attribution.label + "</p>" +
+      "<h2 style='margin-top:0;font-size:1.05rem;'>Saved: " + (recipe.name || "Recipe") + "</h2>" +
+      "<p class='meta-line'>" + describePreFerment(recipe.pre_ferment) + "</p>" +
       "<ul>" + flourLines + "</ul>" +
       "<p class='meta-line'>Flour " + recipe.ingredients_per_ball.flour_g + "g · Water " + recipe.ingredients_per_ball.water_g +
       "g · Salt " + recipe.ingredients_per_ball.salt_g + "g · Oil " + recipe.ingredients_per_ball.oil_g + "g</p>" +
@@ -240,7 +302,7 @@
     el.innerHTML =
       '<div class="card-body">' +
       '<p class="card-name">' + recipe.name + "</p>" +
-      '<p class="card-sub">' + recipe.technique + " · " + recipe.style_attribution.label + "</p>" +
+      '<p class="card-sub">' + describePreFerment(recipe.pre_ferment) + "</p>" +
       "</div>";
     return el;
   }
@@ -268,11 +330,7 @@
     e.preventDefault();
     setStatus(els.status, "Saving…");
     els.result.style.display = "none";
-    const body = {
-      ingredients: { flours: collectFlours() },
-      technique: els.technique.value,
-      style: els.style.value,
-    };
+    const body = { ingredients: { flours: collectFlours() } };
     if (els.name.value.trim()) body.name = els.name.value.trim();
     const ballWeight = numOrUndefined(els.ballWeight);
     if (ballWeight !== undefined) body.ball_weight_g = ballWeight;
@@ -285,18 +343,8 @@
     const yeast = numOrUndefined(els.yeast);
     if (yeast !== undefined) body.yeast_pct = yeast;
 
-    // pre_ferments carries at most one entry - whichever percentage field matches the
-    // selected technique (poolish/biga/sourdough); ignored/absent for direct/same_day/
-    // cold_ferment_* since those don't build a separate preferment.
-    const preFermentPctByTechnique = {
-      poolish: numOrUndefined(els.poolish),
-      biga: numOrUndefined(els.biga),
-      sourdough: numOrUndefined(els.sourdough),
-    };
-    const activePct = preFermentPctByTechnique[els.technique.value];
-    if (activePct !== undefined) {
-      body.pre_ferments = [{ type: els.technique.value, percentage: activePct }];
-    }
+    const preFerment = collectPreFerment();
+    if (preFerment !== undefined) body.pre_ferment = preFerment;
 
     try {
       const recipe = await ownFetch("/recipes", { method: "POST", body: JSON.stringify(body) });
@@ -308,7 +356,9 @@
     }
   });
 
-  loadStyles().catch((e) => setStatus(els.status, "Couldn't load styles: " + e.message, "error"));
+  addPrefermentRow("biga", 60);
+  addPrefermentRow("poolish", 40);
+  loadPreFermentTypes();
   loadFlourOptions().catch((e) => setStatus(els.status, "Couldn't reach flour-service: " + e.message, "error"));
   loadRecent();
 })();

@@ -7,10 +7,9 @@ from typing import Any
 from .config import Settings
 from .db import PizzaRepository
 from .flours import FlourCatalogStore
-from .recipe import PREFERMENT_TECHNIQUES, STYLE_LIBRARY, TECHNIQUES
+from .pre_ferments import PreFermentTypeStore
 from .recipe import compute_recipe as _compute_recipe
 from .recipe import scale_recipe
-from .styles import StyleStore
 
 # Shared by generate_pizza_recipe/save_pizza_recipe below.
 _INGREDIENTS_SCHEMA = {
@@ -32,23 +31,31 @@ _INGREDIENTS_SCHEMA = {
     },
     "required": ["flours"],
 }
-_PRE_FERMENTS_SCHEMA = {
-    "type": "array",
-    "maxItems": 1,
-    "items": {
-        "type": "object",
-        "properties": {
-            "type": {"type": "string", "enum": list(PREFERMENT_TECHNIQUES)},
-            "percentage": {"type": "number", "description": "Baker's % of total flour built into this preferment/starter. Defaults to 40 for poolish/biga, 20 for sourdough, if this entry is omitted entirely."},
-        },
-        "required": ["type", "percentage"],
-    },
+_PRE_FERMENT_SCHEMA = {
+    "type": "object",
     "description": (
-        "At most one - only one preferment technique can be active per recipe. Its "
-        "`type` becomes the recipe's technique unless `technique` is also given "
-        "explicitly (must then match). Omit entirely for direct/same_day/cold_ferment_* "
-        "techniques, which don't build a separate preferment."
+        "Omit entirely for a plain commercial-yeast dough. Set to build a preferment - "
+        "either inline named components (e.g. biga 60% / poolish 40%) or a type_id "
+        "reference to a saved blend from list_pre_ferment_types. The engine always "
+        "computes ONE aggregate preferment formula; named components are descriptive "
+        "only, never computed separately."
     ),
+    "properties": {
+        "type_id": {"type": "string", "description": "References a saved blend instead of describing components inline. Set this or `components`, not both."},
+        "components": {
+            "type": "array",
+            "description": "Inline named components, e.g. [{'name': 'biga', 'percentage': 60}, {'name': 'poolish', 'percentage': 40}] - percentages must sum to 100. Set this or `type_id`, not both.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "e.g. 'biga', 'sourdough', 'poolish'"},
+                    "percentage": {"type": "number", "description": "This component's share of the preferment mix itself, not of total dough flour"},
+                },
+                "required": ["name", "percentage"],
+            },
+        },
+        "percentage": {"type": "number", "description": "Baker's % of total flour built into the preferment. Defaults to 40 if omitted."},
+    },
 }
 
 TOOLS = [
@@ -56,9 +63,8 @@ TOOLS = [
         "name": "generate_pizza_recipe",
         "description": (
             "Compute a pizza dough recipe from a flour blend (baker's percentages that "
-            "don't need to sum to exactly 100 - they get normalized), a fermentation "
-            "technique, and an optional named style anchored to a real pizza-chef/cookbook "
-            "reference. Every ingredients.flours[].pizza_flours_id must match an entry in the "
+            "don't need to sum to exactly 100 - they get normalized) and an optional "
+            "pre-ferment. Every ingredients.flours[].pizza_flours_id must match an entry in the "
             "flour catalogue (list_pizza_flours) - its id or one of its localized names/codes "
             "(e.g. '00', 'Farina 00', 'Weizenmehl 405', 'T45' all resolve to the same flour); "
             "unrecognized flour names are rejected. ingredients.flours[]['ash%'] is optional and "
@@ -66,22 +72,17 @@ TOOLS = [
             "cross-checked against the resolved flour's ash range and helps disambiguate. "
             "ingredients.flours[].description is an optional free-text brand/product note (e.g. "
             "'Semola Caputo') - purely informational, not matched against the catalogue. Any of "
-            "hydration/salt/oil/yeast % or ball weight left unset falls back to the chosen "
-            "style's defaults ('custom' style = generic defaults with no attribution). "
-            "pre_ferments (at most one entry) sets a poolish/biga/sourdough preferment and its "
-            "baker's % of total flour - its type becomes the technique if technique is left "
-            "unset; omit both for a plain 'direct' dough, or set technique alone for "
-            "same_day/cold_ferment_24h/48h/72h (no separate preferment). The formula is always "
-            "for a single dough ball; pass num_balls to scale ingredient quantities up to a "
-            "batch of that many balls (defaults to 1)."
+            "hydration/salt/oil/yeast % or ball weight left unset falls back to a generic "
+            "baker's-percentage default. pre_ferment (optional) builds a preferment - see its "
+            "schema for the type_id vs inline-components choice. The formula is always for a "
+            "single dough ball; pass num_balls to scale ingredient quantities up to a batch of "
+            "that many balls (defaults to 1)."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "ingredients": _INGREDIENTS_SCHEMA,
-                "pre_ferments": _PRE_FERMENTS_SCHEMA,
-                "technique": {"type": "string", "enum": TECHNIQUES, "description": "Optional when pre_ferments has an entry (inferred from its type); defaults to 'direct' otherwise."},
-                "style": {"type": "string", "enum": list(STYLE_LIBRARY), "default": "custom"},
+                "pre_ferment": _PRE_FERMENT_SCHEMA,
                 "hydration_pct": {"type": "number"},
                 "salt_pct": {"type": "number"},
                 "oil_pct": {"type": "number"},
@@ -104,9 +105,7 @@ TOOLS = [
             "properties": {
                 "name": {"type": "string"},
                 "ingredients": _INGREDIENTS_SCHEMA,
-                "pre_ferments": _PRE_FERMENTS_SCHEMA,
-                "technique": {"type": "string", "enum": TECHNIQUES, "description": "Optional when pre_ferments has an entry (inferred from its type); defaults to 'direct' otherwise."},
-                "style": {"type": "string", "enum": list(STYLE_LIBRARY), "default": "custom"},
+                "pre_ferment": _PRE_FERMENT_SCHEMA,
                 "hydration_pct": {"type": "number"},
                 "salt_pct": {"type": "number"},
                 "oil_pct": {"type": "number"},
@@ -117,8 +116,8 @@ TOOLS = [
         },
     },
     {
-        "name": "list_pizza_styles",
-        "description": "List the built-in named styles, each with its pizza-chef/cookbook attribution and defaults.",
+        "name": "list_pre_ferment_types",
+        "description": "List the saved pre-ferment type blends (id + named components) a recipe's pre_ferment.type_id can reference.",
         "input_schema": {"type": "object", "properties": {}},
     },
     {
@@ -160,36 +159,37 @@ TOOLS = [
 
 SYSTEM_PROMPT = (
     "You are the pizza-service agent, a small AI agent embedded in a microservice that "
-    "turns a flour blend, a fermentation technique, and an optional named pizza-chef/"
-    "cookbook style into a scaled dough recipe (ingredient weights + fermentation "
-    "schedule), and can save/list/fetch/delete recipes. Use the provided tools rather than "
-    "computing the math yourself. Be concise, and mention the style's book/author "
-    "attribution when one applies."
+    "turns a flour blend and an optional pre-ferment (poolish, biga, sourdough, or a "
+    "custom named combination) into a scaled dough recipe (ingredient weights + "
+    "fermentation schedule), and can save/list/fetch/delete recipes. Use the provided "
+    "tools rather than computing the math yourself. Be concise."
 )
 
 
-def _resolve_technique(tool_input: dict[str, Any]) -> tuple[str, float | None]:
-    """Mirrors RecipeGenerateRequest._resolve_technique in schemas.py: pre_ferments[0].type
-    becomes the technique unless an explicit (matching) technique is also given; defaults
-    to 'direct' when neither is set. Returns (technique, pre_ferment_percentage)."""
-    pre_ferments = tool_input.get("pre_ferments") or []
-    if len(pre_ferments) > 1:
-        raise ValueError("only one pre_ferment is currently supported")
-    technique = tool_input.get("technique")
-    if pre_ferments:
-        inferred = pre_ferments[0]["type"]
-        if technique is not None and technique != inferred:
-            raise ValueError(f"technique '{technique}' does not match pre_ferments[0].type '{inferred}'")
-        return inferred, pre_ferments[0].get("percentage")
-    return technique or "direct", None
+def _resolve_pre_ferment(pre_ferment_store: PreFermentTypeStore, tool_input: dict[str, Any]) -> dict[str, Any] | None:
+    """Mirrors routers/pizza.py's _resolve_pre_ferment: turns the tool call's pre_ferment
+    (inline components, or a type_id reference) into the {"components": [...],
+    "percentage": ...} shape compute_recipe() expects."""
+    pre_ferment = tool_input.get("pre_ferment")
+    if not pre_ferment:
+        return None
+    type_id = pre_ferment.get("type_id")
+    components = pre_ferment.get("components")
+    if bool(type_id) == bool(components):
+        raise ValueError("set exactly one of pre_ferment.type_id or pre_ferment.components")
+    if type_id is not None:
+        saved = pre_ferment_store.get(type_id)
+        if saved is None:
+            raise ValueError(f"unknown pre_ferment type_id '{type_id}'")
+        components = saved["preferments"]
+    else:
+        total = sum(c["percentage"] for c in components)
+        if abs(total - 100.0) > 0.5:
+            raise ValueError(f"pre_ferment.components percentages must sum to 100 (got {total:.1f})")
+    return {"components": components, "percentage": pre_ferment.get("percentage", 40.0)}
 
 
-def _generate(style_store: StyleStore, flour_store: FlourCatalogStore, tool_input: dict[str, Any]) -> dict[str, Any]:
-    style = tool_input.get("style", "custom")
-    style_defaults = style_store.get(style)
-    if style_defaults is None:
-        raise ValueError(f"unknown style '{style}'")
-
+def _generate(pre_ferment_store: PreFermentTypeStore, flour_store: FlourCatalogStore, tool_input: dict[str, Any]) -> dict[str, Any]:
     flours = tool_input["ingredients"]["flours"]
     unknown = [
         f["pizza_flours_id"] for f in flours
@@ -198,41 +198,32 @@ def _generate(style_store: StyleStore, flour_store: FlourCatalogStore, tool_inpu
     if unknown:
         raise ValueError(f"unknown flour type(s): {', '.join(unknown)} - see list_pizza_flours for the allowed catalogue")
 
-    technique, pre_ferment_percentage = _resolve_technique(tool_input)
+    pre_ferment = _resolve_pre_ferment(pre_ferment_store, tool_input)
 
     return _compute_recipe(
         flours=flours,
-        technique=technique,
-        style=style,
-        style_defaults=style_defaults,
+        pre_ferment=pre_ferment,
         hydration_pct=tool_input.get("hydration_pct"),
         salt_pct=tool_input.get("salt_pct"),
         oil_pct=tool_input.get("oil_pct"),
         yeast_pct=tool_input.get("yeast_pct"),
         ball_weight_g=tool_input.get("ball_weight_g"),
-        pre_ferment_percentage=pre_ferment_percentage,
     )
 
 
 def _dispatch(
-    repo: PizzaRepository, style_store: StyleStore, flour_store: FlourCatalogStore,
+    repo: PizzaRepository, pre_ferment_store: PreFermentTypeStore, flour_store: FlourCatalogStore,
     name: str, tool_input: dict[str, Any],
 ) -> Any:
     try:
         if name == "generate_pizza_recipe":
-            base = _generate(style_store, flour_store, tool_input)
+            base = _generate(pre_ferment_store, flour_store, tool_input)
             return scale_recipe(base, tool_input.get("num_balls", 1))
         if name == "save_pizza_recipe":
-            base = _generate(style_store, flour_store, tool_input)
+            base = _generate(pre_ferment_store, flour_store, tool_input)
             return repo.create(tool_input["name"], base)
-        if name == "list_pizza_styles":
-            return {
-                "styles": [
-                    {"key": k, "label": s["label"], "author": s["author"], "book": s["book"],
-                     "technique": s["technique"], "notes": s["notes"]}
-                    for k, s in style_store.list().items()
-                ]
-            }
+        if name == "list_pre_ferment_types":
+            return {"items": pre_ferment_store.list()}
         if name == "list_pizza_flours":
             return {"flours": flour_store.list()}
         if name == "list_pizza_recipes":
@@ -251,7 +242,7 @@ def _dispatch(
 
 
 def run_agent(
-    settings: Settings, repo: PizzaRepository, style_store: StyleStore, flour_store: FlourCatalogStore,
+    settings: Settings, repo: PizzaRepository, pre_ferment_store: PreFermentTypeStore, flour_store: FlourCatalogStore,
     message: str, history: list[dict],
 ) -> tuple[str, list[dict]]:
     if not settings.anthropic_api_key:
@@ -283,7 +274,7 @@ def run_agent(
         for block in response.content:
             if block.type != "tool_use":
                 continue
-            result = _dispatch(repo, style_store, flour_store, block.name, block.input)
+            result = _dispatch(repo, pre_ferment_store, flour_store, block.name, block.input)
             tool_calls.append({"tool": block.name, "input": block.input, "result": result})
             tool_results.append({
                 "type": "tool_result",

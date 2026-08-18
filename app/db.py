@@ -2,7 +2,7 @@
 Render/managed Postgres, or Azure Cosmos DB by flipping DB_BACKEND in the environment.
 
 Saved recipes store the full computed result (flours, ingredients, fermentation
-schedule, style attribution, ...) as a JSON payload alongside a few indexed columns.
+schedule, pre-ferment breakdown, ...) as a JSON payload alongside a few indexed columns.
 """
 from __future__ import annotations
 
