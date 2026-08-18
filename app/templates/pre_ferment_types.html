@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pre-ferment Types</title>
+<link rel="stylesheet" href="/static/theme.css">
+</head>
+<body>
+<nav class="topnav"><div class="inner">
+  <a class="brand" href="/">Pizza Service</a>
+  <a class="navlink" href="/flour-explorer">Flour Explorer</a>
+  <a class="navlink" href="/flour-products/new">Add Flour Product</a>
+  <a class="navlink" href="/new-recipe">New Recipe</a>
+  <a class="navlink active" href="/pre-ferments">Pre-ferments</a>
+  <a class="navlink" href="/saved-recipes">Recipes</a>
+</div></nav>
+<div class="wrap">
+  <header class="page-head">
+    <h1>Pre-ferment Types</h1>
+    <p class="subtitle">Save a reusable named pre-ferment blend (e.g. biga 60% / poolish 40%) that a recipe can reference by id.</p>
+    <p class="source-note">Saved via this service's own <code>POST /pre-ferment-types</code> - requires a reachable Postgres database (falls back to a local sqlite table otherwise).</p>
+  </header>
+
+  <form class="panel grid-fields" id="blend-form">
+    <div class="field wide">
+      <label for="f-type-id">Blend id</label>
+      <input id="f-type-id" type="text" required placeholder="e.g. biga60_poolish40">
+    </div>
+
+    <div class="field wide">
+      <label>Named components (percentages must sum to 100)</label>
+      <div id="component-rows"></div>
+      <button type="button" id="add-row-btn" style="align-self:flex-start;">+ Add component</button>
+    </div>
+
+    <details class="advanced">
+      <summary>API key</summary>
+      <div style="margin-top:10px; max-width: 320px;">
+        <div class="field"><label for="f-apikey">API key (only if this service requires one)</label><input id="f-apikey" type="password" autocomplete="off" placeholder="X-API-Key"></div>
+      </div>
+    </details>
+
+    <div class="actions-row">
+      <button type="submit" class="primary">Save blend</button>
+    </div>
+  </form>
+
+  <div id="status" role="status" aria-live="polite"></div>
+
+  <h2 style="font-size:1.05rem;">Saved blends</h2>
+  <div id="list-status" class="status-line"></div>
+  <div id="blend-list"></div>
+</div>
+
+<script>
+(function () {
+  let rowCount = 0;
+
+  const els = {
+    form: document.getElementById("blend-form"),
+    typeId: document.getElementById("f-type-id"),
+    rows: document.getElementById("component-rows"),
+    addRowBtn: document.getElementById("add-row-btn"),
+    apikey: document.getElementById("f-apikey"),
+    status: document.getElementById("status"),
+    listStatus: document.getElementById("list-status"),
+    blendList: document.getElementById("blend-list"),
+  };
+
+  function authHeaders(json) {
+    const key = els.apikey.value.trim();
+    const headers = key ? { "X-API-Key": key } : {};
+    if (json) headers["Content-Type"] = "application/json";
+    return headers;
+  }
+
+  async function ownFetch(path, options) {
+    const res = await fetch(path, { ...options, headers: { ...authHeaders(!!options?.body), ...(options?.headers || {}) } });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || (res.status + " " + res.statusText));
+    return body;
+  }
+
+  function setStatus(el, text, cls) {
+    el.textContent = text || "";
+    el.classList.remove("error", "ok");
+    if (cls) el.classList.add(cls);
+  }
+
+  function addRow(name, percentage) {
+    rowCount += 1;
+    const row = document.createElement("div");
+    row.className = "blend-row";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text"; nameInput.required = true; nameInput.placeholder = "e.g. biga";
+    nameInput.value = name || "";
+    const percentInput = document.createElement("input");
+    percentInput.type = "number"; percentInput.step = "1"; percentInput.min = "0"; percentInput.max = "100"; percentInput.required = true;
+    percentInput.placeholder = "%";
+    percentInput.value = percentage !== undefined ? percentage : "";
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button"; removeBtn.textContent = "Remove";
+    removeBtn.addEventListener("click", () => row.remove());
+
+    const wrapField = (labelText, input) => {
+      const field = document.createElement("div");
+      field.className = "field";
+      const label = document.createElement("label");
+      label.textContent = labelText;
+      field.appendChild(label);
+      field.appendChild(input);
+      return field;
+    };
+
+    row.appendChild(wrapField("Component name", nameInput));
+    row.appendChild(wrapField("% of preferment", percentInput));
+    row.appendChild(removeBtn);
+    els.rows.appendChild(row);
+  }
+
+  els.addRowBtn.addEventListener("click", () => addRow());
+
+  function blendCard(item) {
+    const el = document.createElement("article");
+    el.className = "card";
+    const body = document.createElement("div");
+    body.className = "card-body";
+    const blend = item.preferments.map((p) => p.name + " " + p.percentage + "%").join(" / ");
+    body.innerHTML =
+      '<p class="card-name">' + item.type_id + "</p>" +
+      '<p class="card-sub">' + blend + "</p>";
+    const deleteBtn = document.createElement("button");
+    deleteBtn.textContent = "Delete";
+    deleteBtn.className = "danger";
+    deleteBtn.addEventListener("click", async () => {
+      deleteBtn.disabled = true;
+      try {
+        await ownFetch("/pre-ferment-types/" + encodeURIComponent(item.type_id), { method: "DELETE" });
+        loadBlends();
+      } catch (e) {
+        setStatus(els.listStatus, "Couldn't delete: " + e.message, "error");
+        deleteBtn.disabled = false;
+      }
+    });
+    body.appendChild(deleteBtn);
+    el.appendChild(body);
+    return el;
+  }
+
+  async function loadBlends() {
+    setStatus(els.listStatus, "Loading…");
+    els.blendList.innerHTML = "";
+    try {
+      const data = await ownFetch("/pre-ferment-types");
+      if (!data.items.length) {
+        setStatus(els.listStatus, "No pre-ferment types saved yet.");
+        return;
+      }
+      setStatus(els.listStatus, data.items.length + " saved blend" + (data.items.length === 1 ? "" : "s") + ".");
+      const grid = document.createElement("div");
+      grid.className = "grid";
+      for (const item of data.items) grid.appendChild(blendCard(item));
+      els.blendList.appendChild(grid);
+    } catch (e) {
+      setStatus(els.listStatus, "Couldn't load pre-ferment types: " + e.message, "error");
+    }
+  }
+
+  els.form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    setStatus(els.status, "Saving…");
+    const type_id = els.typeId.value.trim();
+    const rows = Array.from(els.rows.querySelectorAll(".blend-row"));
+    if (!rows.length) {
+      setStatus(els.status, "Add at least one named component.", "error");
+      return;
+    }
+    const preferments = rows.map((row) => {
+      const [nameField, percentField] = row.querySelectorAll("input");
+      return { name: nameField.value.trim(), percentage: parseFloat(percentField.value) };
+    });
+    try {
+      await ownFetch("/pre-ferment-types", { method: "POST", body: JSON.stringify({ type_id, preferments }) });
+      setStatus(els.status, "Blend saved.", "ok");
+      els.typeId.value = "";
+      els.rows.innerHTML = "";
+      addRow("biga", 60);
+      addRow("poolish", 40);
+      loadBlends();
+    } catch (e) {
+      setStatus(els.status, "Couldn't save blend: " + e.message, "error");
+    }
+  });
+
+  addRow("biga", 60);
+  addRow("poolish", 40);
+  loadBlends();
+})();
+</script>
+</body>
+</html>

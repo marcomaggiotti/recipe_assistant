@@ -43,10 +43,10 @@ page if that service has its own `API_KEY` set.
 
 ### Browser pages
 
-Four small, dependency-free HTML/JS pages (no frontend build step, shared styling via
+Six small, dependency-free HTML/JS pages (no frontend build step, shared styling via
 `app/static/theme.css`), served directly by this FastAPI app:
 
-- **`/`** - home page with a nav menu linking the other three, plus `/docs`.
+- **`/`** - home page with a nav menu linking the other five, plus `/docs`.
 - **`/flour-explorer`** - queries [flour-service](https://github.com/marcomaggiotti/flour_service)
   directly from the browser; filter by category, gluten, bread/pizza suitability,
   strength tier, or ash%, or look up one flour by name/national type code. Renders
@@ -61,10 +61,19 @@ Four small, dependency-free HTML/JS pages (no frontend build step, shared stylin
   yeast overrides) and save it via this service's own `POST /recipes`; shows the
   computed result and a list of recently saved recipes. Deliberately not at
   `/recipes/new` - that would collide with `GET /recipes/{item_id}`.
+- **`/pre-ferments`** - save a reusable named pre-ferment blend (same "save a new blend"
+  form as `/new-recipe`'s inline flow) via `POST /pre-ferment-types`, and browse/delete
+  what's already saved. Deliberately not nested under `/pre-ferment-types` - that would
+  collide with `GET /pre-ferment-types/{type_id}`.
+- **`/saved-recipes`** - browse saved recipes as a card grid (`GET /recipes`); click one
+  to see its full breakdown and fermentation schedule rendered as a step-by-step
+  pipeline (`GET /recipes/{id}`).
 
-All of them call `flour-service` directly from client-side JS: set `FLOUR_SERVICE_URL`
-to point at a different deployment (default `https://flour-service.onrender.com`), e.g.
-`http://localhost:8001` if you're running flour-service locally too.
+`/flour-explorer`, `/flour-products/new`, and `/new-recipe` call `flour-service`
+directly from client-side JS: set `FLOUR_SERVICE_URL` to point at a different
+deployment (default `https://flour-service.onrender.com`), e.g. `http://localhost:8001`
+if you're running flour-service locally too. `/pre-ferments` and `/saved-recipes` only
+talk to this service's own API.
 
 ## The recipe model
 

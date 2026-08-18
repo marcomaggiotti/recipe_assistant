@@ -10,7 +10,13 @@ PAGE_ROUTES = {
     "/flour-explorer": "Flour Explorer",
     "/flour-products/new": "Add Flour Product",
     "/new-recipe": "New Recipe",
+    "/pre-ferments": "Pre-ferment Types",
+    "/saved-recipes": "Recipes",
 }
+
+# Pages that actually reference flour-service (and so template in __FLOUR_SERVICE_URL__)
+# - /pre-ferments and /saved-recipes don't call flour-service at all.
+FLOUR_SERVICE_PAGES = ["/", "/flour-explorer", "/flour-products/new", "/new-recipe"]
 
 
 def test_all_pages_serve_html():
@@ -21,10 +27,15 @@ def test_all_pages_serve_html():
         assert expected_text in response.text, path
 
 
-def test_all_pages_template_in_the_configured_flour_service_url():
-    for path in PAGE_ROUTES:
+def test_flour_service_pages_template_in_the_configured_flour_service_url():
+    for path in FLOUR_SERVICE_PAGES:
         response = client.get(path)
         assert get_settings().flour_service_url in response.text, path
+
+
+def test_no_page_leaks_the_raw_flour_service_url_placeholder():
+    for path in PAGE_ROUTES:
+        response = client.get(path)
         assert "__FLOUR_SERVICE_URL__" not in response.text, path
 
 
@@ -51,3 +62,11 @@ def test_new_recipe_page_does_not_collide_with_get_recipe_by_id():
     missing_recipe = client.get("/recipes/new")
     assert missing_recipe.status_code == 404
     assert missing_recipe.headers["content-type"].startswith("application/json")
+
+
+def test_pre_ferments_page_does_not_collide_with_get_pre_ferment_type_by_id():
+    # /pre-ferments (not nested under /pre-ferment-types) is deliberate: GET
+    # /pre-ferment-types/{type_id} would otherwise swallow any nested page path.
+    response = client.get("/pre-ferments")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]

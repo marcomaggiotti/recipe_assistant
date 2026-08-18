@@ -1,13 +1,16 @@
-"""Serves the browser pages (index, flour explorer, add-product, new-recipe). Static
-HTML/CSS/JS, no build step, no templating engine - just a __FLOUR_SERVICE_URL__
-placeholder swapped in at request time. flour-explorer/add-flour-product's JS calls
-flour-service (github.com/marcomaggiotti/flour_service) directly from the browser;
-new-recipe's JS calls flour-service for the flour list and this service's own
-/recipes* and /pre-ferment-types for everything else.
+"""Serves the browser pages (index, flour explorer, add-product, new-recipe,
+pre-ferment types, saved recipes). Static HTML/CSS/JS, no build step, no templating
+engine - just a __FLOUR_SERVICE_URL__ placeholder swapped in at request time.
+flour-explorer/add-flour-product's JS calls flour-service
+(github.com/marcomaggiotti/flour_service) directly from the browser; new-recipe,
+pre-ferment-types-page, and saved-recipes call this service's own /recipes* and
+/pre-ferment-types.
 
-Route paths deliberately avoid /recipes/new (which would collide with pizza.py's
-GET /recipes/{item_id} - "new" would be swallowed as an item_id) - the new-recipe page
-lives at /new-recipe instead.
+Route paths deliberately avoid nesting under an existing API prefix - /recipes/new
+would collide with pizza.py's GET /recipes/{item_id} ("new" would be swallowed as an
+item_id), and likewise /pre-ferment-types/<anything> would collide with
+pre_ferment_types.py's GET /pre-ferment-types/{type_id}. So the browser pages live at
+their own sibling paths instead: /new-recipe, /pre-ferments, /saved-recipes.
 """
 from pathlib import Path
 
@@ -44,3 +47,13 @@ def add_flour_product() -> str:
 @router.get("/new-recipe", response_class=HTMLResponse)
 def new_recipe() -> str:
     return _render("new_recipe.html")
+
+
+@router.get("/pre-ferments", response_class=HTMLResponse)
+def pre_ferment_types_page() -> str:
+    return _render("pre_ferment_types.html")
+
+
+@router.get("/saved-recipes", response_class=HTMLResponse)
+def saved_recipes() -> str:
+    return _render("saved_recipes.html")
