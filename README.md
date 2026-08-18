@@ -9,6 +9,11 @@ can do the same from a natural-language instruction via Anthropic tool-calling.
 Extracted from the [`ict_project`](https://github.com/marcomaggiotti/ict_project) monorepo
 as a standalone, self-contained service (own dependencies, Dockerfile, config).
 
+This repo also ships **topping-service** (`topping_service/`), a separate microservice
+for the pizza topping catalog - independent FastAPI app, own storage, own settings -
+built from the same Dockerfile as this one and run as its own container. See
+"[topping-service](#topping-service)" below.
+
 ## Endpoints
 
 | Method | Path              | Description                                                |
@@ -163,30 +168,26 @@ flour) that grade corresponds to, per the Italian DPR 187/2001, German DIN 10355
 French Calvel classifications. Italian Tipo 00 is ash ≤0.55%, Tipo 0 ≤0.65%, Tipo 1
 ≤0.80%, Tipo 2 ≤0.95% (semi-integrale), and integrale 1.30-1.70% (that last one is the
 narrower legal band; the catalogue's `whole_wheat` range, 1.20-1.80%, is the broader
-cross-country correspondence band `WHEAT_CLASSIFICATIONS` in `app/flours.py` derives
-from). Other flours (durum, ancient wheats, rice, legumes, starches, ...) have no ash
-field. A request's `flours[].ash%` is cross-checked against this range when both are
-present.
+cross-country correspondence band). Other flours (durum, ancient wheats, rice, legumes,
+starches, ...) have no ash field. A request's `flours[].ash%` is cross-checked against
+this range when both are present.
 
-This catalogue is seed data (`app/flours.py`'s `FLOUR_CATALOG`). When `DB_BACKEND=cosmos`,
-it lives in its own Cosmos container (`COSMOS_FLOURS_CONTAINER`, default `pizza_flours`)
-instead of hardcoded in the source, seeded automatically the first time that container
-is empty. Non-Cosmos backends (`sqlite`/`postgres`, and the test suite) serve the seed
-data directly from memory. **A container seeded before the ash fields existed won't pick
-them up on its own** (seeding only runs against an empty container) - run
-`python scripts/backfill_flour_ash.py` against it once to patch `ash_min_pct`/
-`ash_max_pct` into the existing documents in place, or delete the container and let the
-app recreate/reseed it from scratch (see below).
-
-The `pizza_recipes`/`pizza_flours` containers (and their non-Cosmos equivalents) are
-built eagerly in `app/main.py`'s startup hook, not lazily on first request - so a deploy
-alone is what creates/reseeds them (e.g. if a container was deleted out-of-band),
-without needing a request to hit a specific endpoint first.
+**This repo keeps no copy of the catalogue.** `app/flours.py` fetches it live from the
+standalone [flour-service](https://github.com/marcomaggiotti/flour_service) microservice
+(`FLOUR_SERVICE_URL`) - the same one the `/flour-explorer` and `/new-recipe` browser
+pages already call directly from client-side JS - via its `GET /flours` (list) and
+`GET /flours/by-name` (id/name/type-code/ash resolution, purpose-built to match this
+service's `pizza_flours_id` lookup semantics) endpoints. This is independent of
+`DB_BACKEND`; it applies on every backend. The tradeoff: `/recipes/generate`, `POST
+/recipes`, and the agent's recipe tools now need flour-service to be reachable, and
+return a clear `400`/agent-tool error if it isn't, rather than falling back to stale
+local data. Set `FLOUR_SERVICE_API_KEY` if that deployment requires one.
 
 ## Configuration
 
-Copy `.env.example` to `.env` and adjust. Key setting: `DB_BACKEND` (controls
-`/recipes/*` and `/recipes/flours` storage):
+Copy `.env.example` to `.env` and adjust. Key setting: `DB_BACKEND` (controls saved-
+recipe storage - `/recipes/flours` always comes live from flour-service regardless, see
+above):
 
 - `sqlite` (default) - zero-config local file DB, good for quick local runs.
 - `postgres` - any Postgres-wire-compatible database, including a **Render**
@@ -210,6 +211,8 @@ saying the key is missing instead of erroring.
 pip install -r requirements-dev.txt
 cp .env.example .env
 uvicorn app.main:app --reload
+# topping-service, in a separate terminal:
+uvicorn topping_service.main:app --reload --port 8001
 ```
 
 ## Run with Docker
@@ -219,6 +222,46 @@ docker compose up --build
 # or, with a local Postgres too:
 docker compose --profile postgres up --build
 ```
+
+`docker compose up` starts both `pizza-service` (port 8000) and `topping-service`
+(port 8001) - see the next section for what topping-service is.
+
+## topping-service
+
+A separate microservice living in this same repo (`topping_service/`) for the pizza
+topping catalog - not part of the `app/` pizza-recipe service at all: its own FastAPI
+app, own settings (`Settings` in `topping_service/config.py`), own storage
+(`topping_service/toppings.py`, mirroring `app/db.py`'s sqlite/Postgres/Cosmos pattern),
+and its own `toppings` table/container - entirely independent of `pizza_recipes`.
+
+It's built from the **same Dockerfile** as pizza-service (`COPY topping_service
+./topping_service` alongside `COPY app ./app`), and which app actually runs in a given
+container is picked at startup by `docker-entrypoint.sh`, based on the `SERVICE` env
+var:
+
+| `SERVICE` value | App that runs |
+|---|---|
+| `pizza-service` (default) | `app/main.py` |
+| `topping-service` | `topping_service/main.py` |
+
+`docker-compose.yml` defines both as separate services built from this one image, each
+setting its own `SERVICE` value. All of topping-service's own settings are prefixed
+`TOPPING_` (`TOPPING_DB_BACKEND`, `TOPPING_API_KEY`, `TOPPING_POSTGRES_URL`, ...) so they
+can share the same `.env` file as pizza-service's `DB_BACKEND`/`API_KEY`/... without
+colliding - see `.env.example`.
+
+### Endpoints
+
+| Method | Path | Description |
+|--------|------|--------------|
+| GET | `/health` | Liveness check |
+| POST | `/toppings` | Create a topping - `name`, `category` (`meat`/`vegetable`/`cheese`/`sauce`/`other`), `vegetarian`, `vegan`, optional `description` |
+| GET | `/toppings` | List toppings (`limit`, `offset`) |
+| GET | `/toppings/{id}` | Get one topping |
+| DELETE | `/toppings/{id}` | Delete a topping |
+
+Same auth convention as pizza-service: set `TOPPING_API_KEY` to require header
+`X-API-Key` on mutating requests; leave it empty (default) to disable auth for local dev.
 
 ## Deploy to Render
 

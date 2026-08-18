@@ -48,7 +48,10 @@ def compute_recipe(request: RecipeGenerateRequest) -> dict:
     """Computes the single-ball formula (baseline, num_balls=1 equivalent). Callers
     apply scale_recipe() themselves for the batch size they actually want."""
     catalog = get_flour_catalog_store()
-    resolved = [(f, catalog.resolve(f.pizza_flours_id, f.ash_pct)) for f in request.ingredients.flours]
+    try:
+        resolved = [(f, catalog.resolve(f.pizza_flours_id, f.ash_pct)) for f in request.ingredients.flours]
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
     unknown = [f.pizza_flours_id for f, flour in resolved if flour is None]
     if unknown:
         raise HTTPException(
@@ -96,7 +99,10 @@ def list_flours():
     in a recipe request must match one of these entries' id or one of its localized names/codes.
     Entries covering milled wheat refinement grades (soft wheat, rye, spelt) also carry
     ash_min_pct/ash_max_pct, the ash content (% per 100g) that grade corresponds to."""
-    return {"items": get_flour_catalog_store().list()}
+    try:
+        return {"items": get_flour_catalog_store().list()}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
 
 
 @router.post("/generate", response_model=GeneratedRecipe)

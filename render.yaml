@@ -1,9 +1,11 @@
 # Render Blueprint for this service: https://render.com/docs/blueprint-spec
 #
 # From the Render dashboard: New -> Blueprint -> point at this repo. Render will build
-# the Dockerfile below and deploy the web service against Azure Cosmos DB for recipes/
-# flours (DB_BACKEND=cosmos), plus a small Render-managed Postgres database used ONLY
-# for pre_ferment_types - that table is Postgres-only regardless of DB_BACKEND (see
+# the Dockerfile below and deploy the web service against Azure Cosmos DB for saved
+# recipes (DB_BACKEND=cosmos - the flour catalogue itself always comes live from the
+# standalone flour-service microservice, see FLOUR_SERVICE_URL/app/flours.py, regardless
+# of DB_BACKEND), plus a small Render-managed Postgres database used ONLY for
+# pre_ferment_types - that table is Postgres-only regardless of DB_BACKEND (see
 # app/pre_ferments.py), so it's wired up independently via its own POSTGRES_URL rather
 # than by switching the whole service's backend.
 #
@@ -34,8 +36,8 @@ services:
         value: ai-agent
       - key: COSMOS_CONTAINER
         value: pizza_recipes
-      - key: COSMOS_FLOURS_CONTAINER
-        value: pizza_flours
+      - key: FLOUR_SERVICE_API_KEY
+        sync: false
       - key: POSTGRES_URL
         fromDatabase:
           name: pre-ferment-types-db

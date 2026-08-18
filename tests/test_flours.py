@@ -1,96 +1,113 @@
+import httpx
+import pytest
+
 from app.config import Settings
-from app.flours import FLOUR_CATALOG, InMemoryFlourCatalogStore, build_flour_catalog_store
+from app.flours import HttpFlourCatalogStore, build_flour_catalog_store
+
+SOFT_WHEAT_00 = {
+    "id": "soft_wheat_00", "pizza_flours_id": "soft_wheat_00", "category": "wheat",
+    "ash_min_pct": 0.00, "ash_max_pct": 0.55,
+    "names": {"en": "Soft wheat flour type 00", "it": "Farina 00", "fr": "Farine T45", "de": "Weizenmehl 405"},
+}
 
 
-def test_resolves_by_id():
-    store = InMemoryFlourCatalogStore()
-    assert store.resolve("soft_wheat_00")["id"] == "soft_wheat_00"
+def _fake_response(status_code, json=None, url="http://flour-service.test/flours"):
+    return httpx.Response(status_code, json=json, request=httpx.Request("GET", url))
 
 
-def test_resolves_by_localized_name_case_insensitively():
-    store = InMemoryFlourCatalogStore()
-    assert store.resolve("Farina 00")["id"] == "soft_wheat_00"
-    assert store.resolve("farina 00")["id"] == "soft_wheat_00"
-    assert store.resolve("Weizenmehl 405")["id"] == "soft_wheat_00"
-    assert store.resolve("Farine T45")["id"] == "soft_wheat_00"
-    assert store.resolve("Farina di riso")["id"] == "rice_white"
-    assert store.resolve("Semola rimacinata")["id"] == "durum_rimacinata"
+def test_list_returns_items_from_flour_service(monkeypatch):
+    captured = {}
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        captured["url"] = url
+        return _fake_response(200, {"items": [SOFT_WHEAT_00], "count": 1})
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    store = HttpFlourCatalogStore(Settings())
+    items = store.list()
+    assert items == [SOFT_WHEAT_00]
+    assert captured["url"] == "https://flour-service.onrender.com/flours"
 
 
-def test_resolves_bare_national_type_codes():
-    store = InMemoryFlourCatalogStore()
-    assert store.resolve("00")["id"] == "soft_wheat_00"
-    assert store.resolve("T45")["id"] == "soft_wheat_00"
-    assert store.resolve("405")["id"] == "soft_wheat_00"
-    assert store.resolve("0")["id"] == "soft_wheat_0"
-    assert store.resolve("integrale")["id"] == "whole_wheat"
+def test_resolve_calls_by_name_endpoint_with_name_and_ash(monkeypatch):
+    captured = {}
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        captured["url"] = url
+        captured["params"] = params
+        return _fake_response(200, SOFT_WHEAT_00)
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    store = HttpFlourCatalogStore(Settings())
+    result = store.resolve("Farina 00", 0.50)
+    assert result == SOFT_WHEAT_00
+    assert captured["url"] == "https://flour-service.onrender.com/flours/by-name"
+    assert captured["params"] == {"name": "Farina 00", "ash%": 0.50}
 
 
-def test_unrecognized_flour_does_not_resolve():
-    store = InMemoryFlourCatalogStore()
+def test_resolve_omits_ash_param_when_unset(monkeypatch):
+    captured = {}
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        captured["params"] = params
+        return _fake_response(200, SOFT_WHEAT_00)
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    store = HttpFlourCatalogStore(Settings())
+    store.resolve("soft_wheat_00")
+    assert captured["params"] == {"name": "soft_wheat_00"}
+
+
+def test_resolve_returns_none_on_404(monkeypatch):
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: _fake_response(404, {"detail": "no flour matches"}))
+    store = HttpFlourCatalogStore(Settings())
     assert store.resolve("moon dust") is None
-    assert store.resolve("") is None
 
 
-def test_wheat_refinement_grades_carry_ash_content():
-    store = InMemoryFlourCatalogStore()
-    assert store.resolve("00")["ash_max_pct"] == 0.55
-    assert store.resolve("integrale")["ash_min_pct"] == 1.20
-    assert store.resolve("rye")["ash_max_pct"] == 2.00
+def test_raises_clear_error_when_flour_service_unreachable(monkeypatch):
+    def fake_get(*a, **k):
+        raise httpx.ConnectError("connection refused")
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    store = HttpFlourCatalogStore(Settings())
+    with pytest.raises(ValueError, match="flour-service"):
+        store.list()
 
 
-def test_flours_without_a_tracked_ash_grade_have_none():
-    store = InMemoryFlourCatalogStore()
-    assert store.resolve("rice_white").get("ash_min_pct") is None
-    assert store.resolve("durum_rimacinata").get("ash_min_pct") is None
+def test_raises_clear_error_on_server_error(monkeypatch):
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: _fake_response(500, {"detail": "boom"}))
+    store = HttpFlourCatalogStore(Settings())
+    with pytest.raises(ValueError, match="flour-service"):
+        store.list()
 
 
-def test_ash_pct_disambiguates_when_description_alone_would_be_ambiguous():
-    store = InMemoryFlourCatalogStore()
-    ambiguous = [
-        {**flour, "names": {"en": "Ambiguous wheat"}}
-        for flour in FLOUR_CATALOG if flour["id"] in ("soft_wheat_00", "soft_wheat_0")
-    ]
+def test_sends_api_key_header_when_configured(monkeypatch):
+    captured = {}
 
-    class _FixtureStore(InMemoryFlourCatalogStore):
-        def list(self):
-            return ambiguous
+    def fake_get(url, params=None, headers=None, timeout=None):
+        captured["headers"] = headers
+        return _fake_response(200, {"items": []})
 
-    fixture = _FixtureStore()
-    assert fixture.resolve("Ambiguous wheat", 0.30)["id"] == "soft_wheat_00"
-    assert fixture.resolve("Ambiguous wheat", 0.60)["id"] == "soft_wheat_0"
+    monkeypatch.setattr(httpx, "get", fake_get)
+    store = HttpFlourCatalogStore(Settings(flour_service_api_key="secret"))
+    store.list()
+    assert captured["headers"] == {"X-API-Key": "secret"}
 
 
-def test_every_alias_maps_to_exactly_one_flour():
-    # A bare code like "00" or "1" must not be ambiguous between two catalogue entries.
-    store = InMemoryFlourCatalogStore()
-    seen: dict[str, str] = {}
-    for flour in FLOUR_CATALOG:
-        for key in [flour["id"], *flour.get("names", {}).values()]:
-            if not key:
-                continue
-            key = key.strip().lower()
-            resolved = store.resolve(key)
-            assert resolved is not None, f"{key!r} should resolve"
-            seen.setdefault(key, resolved["id"])
-            assert seen[key] == resolved["id"], f"{key!r} resolves inconsistently"
+def test_omits_api_key_header_when_unset(monkeypatch):
+    captured = {}
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        captured["headers"] = headers
+        return _fake_response(200, {"items": []})
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    store = HttpFlourCatalogStore(Settings())
+    store.list()
+    assert captured["headers"] == {}
 
 
-def test_build_flour_catalog_store_defaults_to_in_memory_for_non_cosmos_backends():
-    for backend in ("sqlite", "postgres"):
+def test_build_flour_catalog_store_always_returns_http_store():
+    for backend in ("sqlite", "postgres", "cosmos"):
         store = build_flour_catalog_store(Settings(db_backend=backend))
-        assert isinstance(store, InMemoryFlourCatalogStore)
-
-
-def test_catalog_entries_carry_pizza_flours_id_matching_their_id():
-    for flour in FLOUR_CATALOG:
-        assert flour["pizza_flours_id"] == flour["id"]
-
-
-def test_catalog_entries_carry_description_mirroring_notes():
-    for flour in FLOUR_CATALOG:
-        assert flour["description"] == flour.get("notes")
-    with_notes = next(f for f in FLOUR_CATALOG if f.get("notes"))
-    assert with_notes["description"] == with_notes["notes"]
-    without_notes = next(f for f in FLOUR_CATALOG if not f.get("notes"))
-    assert without_notes["description"] is None
+        assert isinstance(store, HttpFlourCatalogStore)
