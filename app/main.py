@@ -18,8 +18,10 @@ async def lifespan(app: FastAPI):
     # Build the repo/flour/pre_ferment_type stores at boot rather than lazily on first
     # request - with DB_BACKEND=cosmos this is what creates/reseeds the pizza_recipes/
     # pizza_flours containers, so a deploy (not incoming traffic timing) is what
-    # determines when that happens. get_pre_ferment_type_store() is Postgres-only, but
-    # safe to build eagerly on any backend (it only raises when actually used).
+    # determines when that happens. get_pre_ferment_type_store() prefers Postgres
+    # (falling back to sqlite if it's unreachable) independent of DB_BACKEND, and is
+    # safe to build eagerly regardless - that choice is resolved lazily on first use,
+    # not here, so it never blocks startup on a Postgres connection attempt.
     get_repo()
     get_flour_catalog_store()
     get_pre_ferment_type_store()

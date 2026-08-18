@@ -1,7 +1,11 @@
 # Render Blueprint for this service: https://render.com/docs/blueprint-spec
 #
 # From the Render dashboard: New -> Blueprint -> point at this repo. Render will build
-# the Dockerfile below and deploy the web service against Azure Cosmos DB.
+# the Dockerfile below and deploy the web service against Azure Cosmos DB for recipes/
+# flours (DB_BACKEND=cosmos), plus a small Render-managed Postgres database used ONLY
+# for pre_ferment_types - that table is Postgres-only regardless of DB_BACKEND (see
+# app/pre_ferments.py), so it's wired up independently via its own POSTGRES_URL rather
+# than by switching the whole service's backend.
 #
 # Cosmos DB itself is NOT provisioned by this blueprint (Render doesn't host Cosmos -
 # it's an Azure service). Create a Cosmos DB account (NoSQL API) in the Azure Portal
@@ -32,6 +36,10 @@ services:
         value: pizza_recipes
       - key: COSMOS_FLOURS_CONTAINER
         value: pizza_flours
+      - key: POSTGRES_URL
+        fromDatabase:
+          name: pre-ferment-types-db
+          property: connectionString
       - key: API_KEY
         sync: false
       - key: ANTHROPIC_API_KEY
@@ -41,11 +49,13 @@ services:
       - key: CORS_ALLOW_ORIGINS
         value: "*"
 
-# To use Render's managed Postgres instead, switch DB_BACKEND to "postgres", drop the
-# COSMOS_* env vars above, add a POSTGRES_URL env var with `fromDatabase: {name: pizza-db,
-# property: connectionString}`, and add:
-# databases:
-#   - name: pizza-db
-#     plan: free
-#     databaseName: pizza_db
-#     user: pizza
+databases:
+  - name: pre-ferment-types-db
+    plan: free
+    databaseName: pre_ferment_types
+    user: pizza
+
+# To run the WHOLE service against Render's managed Postgres instead of Cosmos, switch
+# DB_BACKEND to "postgres" and drop the COSMOS_* env vars above - POSTGRES_URL (and the
+# databases: block) can stay as-is, since /recipes/* and /pre-ferment-types would then
+# share the same Postgres database.
