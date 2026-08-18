@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recipes</title>
+<link rel="stylesheet" href="/static/theme.css">
+</head>
+<body>
+<nav class="topnav"><div class="inner">
+  <a class="brand" href="/">Pizza Service</a>
+  <a class="navlink" href="/flour-explorer">Flour Explorer</a>
+  <a class="navlink" href="/flour-products/new">Add Flour Product</a>
+  <a class="navlink" href="/new-recipe">New Recipe</a>
+  <a class="navlink" href="/pre-ferments">Pre-ferments</a>
+  <a class="navlink active" href="/saved-recipes">Recipes</a>
+</div></nav>
+<div class="wrap">
+  <header class="page-head">
+    <h1>Recipes</h1>
+    <p class="subtitle">Saved dough formulas - click one to see its fermentation schedule as a pipeline.</p>
+  </header>
+
+  <div id="list-status" class="status-line"></div>
+  <div id="recipe-list"></div>
+
+  <div id="detail" class="panel" style="display:none; margin-top:22px;"></div>
+</div>
+
+<script>
+(function () {
+  const els = {
+    listStatus: document.getElementById("list-status"),
+    recipeList: document.getElementById("recipe-list"),
+    detail: document.getElementById("detail"),
+  };
+
+  let selectedCard = null;
+
+  async function ownFetch(path) {
+    const res = await fetch(path);
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || (res.status + " " + res.statusText));
+    return body;
+  }
+
+  function setStatus(el, text, cls) {
+    el.textContent = text || "";
+    el.classList.remove("error", "ok");
+    if (cls) el.classList.add(cls);
+  }
+
+  function describePreFerment(preFerment) {
+    if (!preFerment) return "Direct dough (no pre-ferment)";
+    const blend = preFerment.components.map((c) => c.name + " " + c.percentage + "%").join(" / ");
+    return blend + " preferment, " + preFerment.percentage + "% of total flour";
+  }
+
+  function recipeCard(recipe) {
+    const el = document.createElement("article");
+    el.className = "card clickable";
+    el.dataset.id = recipe.id;
+    el.innerHTML =
+      '<div class="card-body">' +
+      '<p class="card-name">' + recipe.name + "</p>" +
+      '<p class="card-sub">' + describePreFerment(recipe.pre_ferment) + "</p>" +
+      '<p class="meta-line">' + recipe.ball_weight_g + "g/ball · " + new Date(recipe.created_at).toLocaleDateString() + "</p>" +
+      "</div>";
+    el.addEventListener("click", () => selectRecipe(recipe.id, el));
+    return el;
+  }
+
+  async function loadRecipes() {
+    setStatus(els.listStatus, "Loading…");
+    els.recipeList.innerHTML = "";
+    try {
+      const data = await ownFetch("/recipes?limit=50");
+      if (!data.items.length) {
+        setStatus(els.listStatus, "No recipes saved yet - build one on the New Recipe page.");
+        return;
+      }
+      setStatus(els.listStatus, data.count + " saved recipe" + (data.count === 1 ? "" : "s") + ".");
+      const grid = document.createElement("div");
+      grid.className = "grid";
+      for (const recipe of data.items) grid.appendChild(recipeCard(recipe));
+      els.recipeList.appendChild(grid);
+    } catch (e) {
+      setStatus(els.listStatus, "Couldn't load recipes: " + e.message, "error");
+    }
+  }
+
+  function pipelineHtml(schedule) {
+    const steps = schedule.map((step, i) =>
+      '<div class="pipeline-step">' +
+      '<div class="pipeline-step-num">' + (i + 1) + "</div>" +
+      "<h3>" + step.stage + "</h3>" +
+      '<p class="meta-line">' + step.duration + " · " + step.temperature + "</p>" +
+      (step.notes ? '<p class="pipeline-notes">' + step.notes + "</p>" : "") +
+      "</div>"
+    );
+    return '<div class="pipeline">' + steps.join('<div class="pipeline-arrow">&#8594;</div>') + "</div>";
+  }
+
+  function renderDetail(recipe) {
+    const flourLines = recipe.ingredients.flours.map((f) => "<li>" + f.pizza_flours_id + " - " + f.percent + "% (" + f.grams + "g)</li>").join("");
+    els.detail.style.display = "block";
+    els.detail.innerHTML =
+      "<h2 style='margin-top:0;font-size:1.1rem;'>" + recipe.name + "</h2>" +
+      "<p class='meta-line'>" + describePreFerment(recipe.pre_ferment) + "</p>" +
+      "<p class='meta-line'>Hydration " + recipe.hydration_pct + "% · Salt " + recipe.salt_pct + "% · Oil " + recipe.oil_pct + "%</p>" +
+      "<ul>" + flourLines + "</ul>" +
+      "<p class='meta-line'>Flour " + recipe.ingredients_per_ball.flour_g + "g · Water " + recipe.ingredients_per_ball.water_g +
+      "g · Salt " + recipe.ingredients_per_ball.salt_g + "g · Oil " + recipe.ingredients_per_ball.oil_g + "g (per ball)</p>" +
+      "<h3 style='font-size:0.95rem;margin-bottom:6px;'>Fermentation schedule</h3>" +
+      pipelineHtml(recipe.fermentation_schedule) +
+      (recipe.warnings.length ? "<p class='status-line error'>" + recipe.warnings.join(" · ") + "</p>" : "");
+    els.detail.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  async function selectRecipe(id, cardEl) {
+    if (selectedCard) selectedCard.classList.remove("selected");
+    cardEl.classList.add("selected");
+    selectedCard = cardEl;
+    els.detail.style.display = "block";
+    els.detail.innerHTML = '<p class="loading">Loading…</p>';
+    try {
+      const recipe = await ownFetch("/recipes/" + encodeURIComponent(id));
+      renderDetail(recipe);
+    } catch (e) {
+      els.detail.innerHTML = '<p class="status-line error">Couldn\'t load recipe: ' + e.message + "</p>";
+    }
+  }
+
+  loadRecipes();
+})();
+</script>
+</body>
+</html>
