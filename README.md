@@ -25,10 +25,10 @@ built from the same Dockerfile as this one and run as its own container. See
 | GET    | `/recipes`        | List saved recipes (`limit`, `offset`)                        |
 | GET    | `/recipes/{id}`   | Get one saved recipe (`?num_balls=N`, default 1)               |
 | DELETE | `/recipes/{id}`   | Delete a saved recipe                                          |
-| POST   | `/pre-ferment-types` | Save a reusable named pre-ferment blend (Postgres-preferred, sqlite fallback) |
-| GET    | `/pre-ferment-types` | List saved pre-ferment blends (Postgres-preferred, sqlite fallback) |
-| GET    | `/pre-ferment-types/{id}` | Get one saved pre-ferment blend (Postgres-preferred, sqlite fallback) |
-| DELETE | `/pre-ferment-types/{id}` | Delete a saved pre-ferment blend (Postgres-preferred, sqlite fallback) |
+| POST   | `/pre-ferment-types` | Save a reusable named pre-ferment blend (Postgres-backed) |
+| GET    | `/pre-ferment-types` | List saved pre-ferment blends (Postgres-backed) |
+| GET    | `/pre-ferment-types/{id}` | Get one saved pre-ferment blend (Postgres-backed) |
+| DELETE | `/pre-ferment-types/{id}` | Delete a saved pre-ferment blend (Postgres-backed) |
 | POST   | `/agent/chat`     | Natural-language agent chat over recipe generation/storage    |
 | GET    | `/`               | Browser page - home/nav menu |
 | GET    | `/flour-explorer` | Browser page - filterable thumbnail grid over the flour catalogue |
@@ -143,18 +143,20 @@ of `num_balls`, **not** to be confused with `ingredients.flours` - different thi
 happen to share a name prefix), `ingredients_total` (the full batch), and a step-by-step
 fermentation schedule.
 
-### Pre-ferment types (Postgres-preferred, sqlite fallback)
+### Pre-ferment types (Postgres-backed)
 
 `pre_ferment_types` is a small reference table of reusable named blends a recipe's
 `pre_ferment.type_id` points at - e.g. save `biga80_sourdough20` once (biga 80% /
 sourdough 20%), then reuse it across recipes. It connects via `POSTGRES_URL`,
 **independent of `DB_BACKEND`** - so a deployment can run `/recipes/*` on sqlite or
 Cosmos and still use `/pre-ferment-types`, just by pointing `POSTGRES_URL` at a real
-Postgres database (this is how the Render blueprint is set up - see below). If Postgres
-isn't reachable, it falls back to a table in the local sqlite file (`SQLITE_PATH`)
-instead of erroring - so the feature keeps working (e.g. local dev with no Postgres
-running at all). That choice is made once per running process, the first time
-`/pre-ferment-types` is actually used, not at startup.
+Postgres database (this is how the Render blueprint is set up - see below). There is
+**no local-storage fallback**: Render's free web service tier has no persistent disk,
+so a sqlite fallback would silently write composed pre-ferment types to storage that
+gets wiped on the next restart/redeploy. If Postgres isn't reachable, `/pre-ferment-types`
+fails loudly with a 400 explaining that `POSTGRES_URL` needs to be set/reachable,
+rather than silently losing data later. The connection is made lazily, the first time
+`/pre-ferment-types` is actually used, not at startup - so app boot never blocks on it.
 
 ```json
 // POST /pre-ferment-types

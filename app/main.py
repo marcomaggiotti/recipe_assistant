@@ -21,9 +21,11 @@ async def lifespan(app: FastAPI):
     # happens. get_flour_catalog_store() just wraps flour-service's HTTP API (see
     # app/flours.py) - constructing it does no I/O, so it's safe to build eagerly
     # regardless of whether flour-service is reachable. get_pre_ferment_type_store()
-    # prefers Postgres (falling back to sqlite if it's unreachable) independent of
-    # DB_BACKEND, and is likewise safe to build eagerly - that choice is resolved lazily
-    # on first use, not here, so it never blocks startup on a Postgres connection attempt.
+    # always uses Postgres (see app/pre_ferments.py - no local-storage fallback, since
+    # Render's free tier has no persistent disk to fall back onto), independent of
+    # DB_BACKEND, and is likewise safe to build eagerly - the actual connection happens
+    # lazily on first use, not here, so it never blocks startup on a Postgres connection
+    # attempt.
     get_repo()
     get_flour_catalog_store()
     get_pre_ferment_type_store()
