@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import app
-from app.pre_ferments import PostgresPreFermentTypeStore, build_pre_ferment_type_store
+from app.pre_ferments import build_pre_ferment_type_store
 
 client = TestClient(app)
 
@@ -26,27 +26,23 @@ def _has_local_postgres() -> bool:
 requires_postgres = pytest.mark.skipif(not _has_local_postgres(), reason="no local postgres available")
 
 
-def _unreachable_settings(tmp_path, name="fallback.db") -> Settings:
-    return Settings(
-        postgres_url="postgresql+psycopg2://nope:nope@localhost:1/nope",
-        sqlite_path=str(tmp_path / name),
-    )
+def _unreachable_settings() -> Settings:
+    return Settings(postgres_url="postgresql+psycopg2://nope:nope@localhost:1/nope")
 
 
-def test_store_falls_back_to_sqlite_when_postgres_unreachable(tmp_path):
-    store = build_pre_ferment_type_store(_unreachable_settings(tmp_path))
-    created = store.create("test_type", [{"name": "biga", "percentage": 100}])
-    assert created == {"type_id": "test_type", "preferments": [{"name": "biga", "percentage": 100}]}
-    assert store.get("test_type") == created
-    assert any(item["type_id"] == "test_type" for item in store.list())
-    assert store.delete("test_type") is True
-    assert store.get("test_type") is None
+def test_store_raises_a_clear_error_when_postgres_is_unreachable():
+    # There is deliberately no local-storage fallback (Render's free tier has no
+    # persistent disk to fall back onto) - an unreachable Postgres must fail loudly
+    # rather than silently writing to storage that won't survive a restart.
+    store = build_pre_ferment_type_store(_unreachable_settings())
+    with pytest.raises(ValueError, match="pre_ferment types require a reachable Postgres database"):
+        store.list()
 
 
-def test_store_never_raises_or_blocks_on_construction_even_with_unreachable_postgres_url(tmp_path):
-    # main.py's lifespan builds this eagerly on every boot - resolving Postgres vs the
-    # sqlite fallback happens lazily on first actual use, never at construction.
-    build_pre_ferment_type_store(_unreachable_settings(tmp_path))
+def test_store_never_raises_or_blocks_on_construction_even_with_unreachable_postgres_url():
+    # main.py's lifespan builds this eagerly on every boot - the actual connection
+    # attempt happens lazily on first use, never at construction.
+    build_pre_ferment_type_store(_unreachable_settings())
 
 
 @requires_postgres
@@ -64,13 +60,6 @@ def test_postgres_store_create_get_list_delete_roundtrip():
     finally:
         assert store.delete(type_id) is True
     assert store.get(type_id) is None
-
-
-@requires_postgres
-def test_prefers_postgres_over_sqlite_fallback_when_reachable():
-    store = build_pre_ferment_type_store(Settings())
-    store.list()  # forces the lazy Postgres-vs-sqlite resolution
-    assert isinstance(store._resolve(), PostgresPreFermentTypeStore)
 
 
 @requires_postgres
