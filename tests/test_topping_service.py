@@ -1,6 +1,9 @@
 from fastapi.testclient import TestClient
 
+from topping_service.catalog import TOPPING_CATALOG
+from topping_service.config import Settings
 from topping_service.main import app
+from topping_service.toppings import build_repository
 
 client = TestClient(app)
 
@@ -87,3 +90,50 @@ def test_list_pagination():
     finally:
         for item_id in ids:
             client.delete(f"/toppings/{item_id}")
+
+
+def test_create_composite_topping_with_components():
+    create = client.post(
+        "/toppings",
+        json={
+            "name": "Pesto", "category": "sauce", "vegetarian": True, "vegan": False,
+            "components": [{"name": "basil"}, {"name": "pine nuts"}, {"name": "olive oil", "amount": "2 tbsp"}],
+        },
+    )
+    assert create.status_code == 201
+    body = create.json()
+    assert body["components"] == [
+        {"name": "basil", "amount": None},
+        {"name": "pine nuts", "amount": None},
+        {"name": "olive oil", "amount": "2 tbsp"},
+    ]
+    fetched = client.get(f"/toppings/{body['id']}")
+    assert fetched.json()["components"][2]["amount"] == "2 tbsp"
+    client.delete(f"/toppings/{body['id']}")
+
+
+def test_simple_topping_has_no_components():
+    create = client.post("/toppings", json={"name": "Plain cheese", "category": "cheese"})
+    assert create.status_code == 201
+    assert create.json()["components"] is None
+    client.delete(f"/toppings/{create.json()['id']}")
+
+
+def test_repository_seeds_the_topping_catalog_when_empty(tmp_path):
+    settings = Settings(sqlite_path=str(tmp_path / "seed_test.db"))
+    repo = build_repository(settings)
+    items, total = repo.list(200, 0)
+    assert total == len(TOPPING_CATALOG)
+    names = {item["name"] for item in items}
+    assert "Mozzarella" in names
+    assert "Pesto" in names
+    pesto = next(item for item in items if item["name"] == "Pesto")
+    assert pesto["components"] == TOPPING_CATALOG[[t["name"] for t in TOPPING_CATALOG].index("Pesto")]["components"]
+
+
+def test_repository_does_not_reseed_once_populated(tmp_path):
+    settings = Settings(sqlite_path=str(tmp_path / "reseed_test.db"))
+    build_repository(settings)  # first boot: seeds
+    repo = build_repository(settings)  # second boot: table already has data
+    _, total = repo.list(1, 0)
+    assert total == len(TOPPING_CATALOG)

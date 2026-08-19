@@ -12,11 +12,16 @@ PAGE_ROUTES = {
     "/new-recipe": "New Recipe",
     "/pre-ferments": "Pre-ferment Types",
     "/saved-recipes": "Recipes",
+    "/compose-pizza": "Compose Pizza",
+    "/toppings": "Toppings",
 }
 
 # Pages that actually reference flour-service (and so template in __FLOUR_SERVICE_URL__)
-# - /pre-ferments and /saved-recipes don't call flour-service at all.
+# - /pre-ferments, /saved-recipes, /compose-pizza, /toppings don't call flour-service.
 FLOUR_SERVICE_PAGES = ["/", "/flour-explorer", "/flour-products/new", "/new-recipe"]
+
+# Pages that reference topping-service (and so template in __TOPPING_SERVICE_URL__).
+TOPPING_SERVICE_PAGES = ["/", "/compose-pizza", "/toppings"]
 
 
 def test_all_pages_serve_html():
@@ -33,10 +38,22 @@ def test_flour_service_pages_template_in_the_configured_flour_service_url():
         assert get_settings().flour_service_url in response.text, path
 
 
+def test_topping_service_pages_template_in_the_configured_topping_service_url():
+    for path in TOPPING_SERVICE_PAGES:
+        response = client.get(path)
+        assert get_settings().topping_service_url in response.text, path
+
+
 def test_no_page_leaks_the_raw_flour_service_url_placeholder():
     for path in PAGE_ROUTES:
         response = client.get(path)
         assert "__FLOUR_SERVICE_URL__" not in response.text, path
+
+
+def test_no_page_leaks_the_raw_topping_service_url_placeholder():
+    for path in PAGE_ROUTES:
+        response = client.get(path)
+        assert "__TOPPING_SERVICE_URL__" not in response.text, path
 
 
 def test_all_pages_are_excluded_from_the_openapi_schema():

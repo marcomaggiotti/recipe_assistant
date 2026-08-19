@@ -39,6 +39,15 @@ class Settings(BaseSettings):
     flour_service_url: str = "https://flour-service.onrender.com"
     flour_service_api_key: str = ""
 
+    # topping-service (topping_service/) - a separate microservice in this same repo/
+    # image (see docker-entrypoint.sh) but its own HTTP server; the /compose-pizza and
+    # /toppings pages call it directly from client-side JS, same pattern as
+    # flour-service above. Defaults to the local docker-compose port (8001) since
+    # there's no public deployment of it (unlike flour-service) - override for
+    # wherever it's actually running.
+    topping_service_url: str = "http://localhost:8001"
+    topping_service_api_key: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:

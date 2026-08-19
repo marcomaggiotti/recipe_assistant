@@ -1,7 +1,11 @@
 # Compose file for running/developing this repo's services locally. pizza-service and
 # topping-service are built from the SAME image (this repo's single Dockerfile) - which
 # app actually runs is picked at container startup via the SERVICE env var (see
-# docker-entrypoint.sh).
+# docker-entrypoint.sh). pizza-service's /compose-pizza and /toppings pages call
+# topping-service directly from browser-side JS, at TOPPING_SERVICE_URL (defaults to
+# http://localhost:8001, matching topping-service's port mapping below - that's the
+# browser's own view of it, not a docker-network-internal address, since the fetch()
+# calls happen in the user's browser, not inside the pizza-service container).
 services:
   pizza-service:
     build: .

@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compose Pizza</title>
+<link rel="stylesheet" href="/static/theme.css">
+</head>
+<body>
+<nav class="topnav"><div class="inner">
+  <a class="brand" href="/">Pizza Service</a>
+  <a class="navlink" href="/flour-explorer">Flour Explorer</a>
+  <a class="navlink" href="/flour-products/new">Add Flour Product</a>
+  <a class="navlink" href="/new-recipe">New Recipe</a>
+  <a class="navlink" href="/pre-ferments">Pre-ferments</a>
+  <a class="navlink" href="/saved-recipes">Recipes</a>
+  <a class="navlink active" href="/compose-pizza">Compose Pizza</a>
+  <a class="navlink" href="/toppings">Toppings</a>
+</div></nav>
+<div class="wrap">
+  <header class="page-head">
+    <h1>Compose Pizza</h1>
+    <p class="subtitle">Pick toppings from the pizzeria menu to build your pizza. Toppings marked "recipe" are themselves composed of a few ingredients (e.g. pesto, ricotta with lemon zest) - open one to see the breakdown.</p>
+    <p class="source-note">Menu served live by <a href="__TOPPING_SERVICE_URL__/docs" target="_blank" rel="noopener">topping-service</a> - add more on the <a href="/toppings">Toppings</a> page.</p>
+  </header>
+
+  <div class="panel" id="selection-panel">
+    <h2 style="margin-top:0;font-size:1rem;">Your pizza</h2>
+    <div id="selection-empty" class="status-line">No toppings selected yet - click any topping below to add it.</div>
+    <div id="selection-list" class="badges"></div>
+    <div class="actions-row" id="selection-actions" style="display:none;">
+      <button type="button" id="clear-btn">Clear selection</button>
+    </div>
+  </div>
+
+  <div class="field" style="max-width:220px;">
+    <label for="f-filter">Filter by category</label>
+    <select id="f-filter">
+      <option value="">All categories</option>
+      <option value="vegetable">Vegetable</option>
+      <option value="cheese">Cheese</option>
+      <option value="meat">Meat</option>
+      <option value="sauce">Sauce</option>
+      <option value="other">Other</option>
+    </select>
+  </div>
+  <div id="list-status" class="status-line"></div>
+  <div id="topping-container"></div>
+</div>
+
+<script>
+(function () {
+  const TOPPING_SERVICE_BASE = "__TOPPING_SERVICE_URL__";
+  let allToppings = [];
+  const selected = new Map();
+
+  const els = {
+    filter: document.getElementById("f-filter"),
+    listStatus: document.getElementById("list-status"),
+    container: document.getElementById("topping-container"),
+    selectionEmpty: document.getElementById("selection-empty"),
+    selectionList: document.getElementById("selection-list"),
+    selectionActions: document.getElementById("selection-actions"),
+    clearBtn: document.getElementById("clear-btn"),
+  };
+
+  function setStatus(el, text, cls) {
+    el.textContent = text || "";
+    el.classList.remove("error", "ok");
+    if (cls) el.classList.add(cls);
+  }
+
+  function renderSelection() {
+    const items = Array.from(selected.values());
+    els.selectionEmpty.style.display = items.length ? "none" : "";
+    els.selectionActions.style.display = items.length ? "" : "none";
+    els.selectionList.innerHTML = items.map((t) =>
+      '<span class="badge ok">' + t.name + "</span>"
+    ).join("");
+  }
+
+  function toggleSelect(topping, cardEl) {
+    if (selected.has(topping.id)) {
+      selected.delete(topping.id);
+      cardEl.classList.remove("selected");
+    } else {
+      selected.set(topping.id, topping);
+      cardEl.classList.add("selected");
+    }
+    renderSelection();
+  }
+
+  els.clearBtn.addEventListener("click", () => {
+    selected.clear();
+    renderSelection();
+    for (const card of els.container.querySelectorAll(".card.selected")) card.classList.remove("selected");
+  });
+
+  function toppingCard(topping) {
+    const el = document.createElement("article");
+    el.className = "card clickable";
+    if (selected.has(topping.id)) el.classList.add("selected");
+    const body = document.createElement("div");
+    body.className = "card-body";
+    const badges =
+      '<span class="badge">' + topping.category + "</span>" +
+      (topping.vegan ? '<span class="badge ok">vegan</span>' : topping.vegetarian ? '<span class="badge ok">vegetarian</span>' : "") +
+      (topping.components ? '<span class="badge">recipe</span>' : "");
+    body.innerHTML =
+      '<p class="card-name">' + topping.name + "</p>" +
+      '<div class="badges">' + badges + "</div>" +
+      (topping.description ? '<p class="card-sub">' + topping.description + "</p>" : "");
+    if (topping.components) {
+      const details = document.createElement("div");
+      details.className = "details";
+      details.innerHTML = "<dt>Components</dt><dd>" +
+        topping.components.map((c) => c.name + (c.amount ? " (" + c.amount + ")" : "")).join(", ") + "</dd>";
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.textContent = "Recipe";
+      toggle.addEventListener("click", (e) => {
+        e.stopPropagation();
+        details.classList.toggle("open");
+      });
+      body.appendChild(toggle);
+      body.appendChild(details);
+    }
+    el.appendChild(body);
+    el.addEventListener("click", (e) => {
+      if (e.target.tagName === "BUTTON") return;
+      toggleSelect(topping, el);
+    });
+    return el;
+  }
+
+  function renderContainer() {
+    const filterValue = els.filter.value;
+    const filtered = filterValue ? allToppings.filter((t) => t.category === filterValue) : allToppings;
+    els.container.innerHTML = "";
+    if (!filtered.length) {
+      setStatus(els.listStatus, "No toppings in this category.");
+      return;
+    }
+    setStatus(els.listStatus, filtered.length + " topping" + (filtered.length === 1 ? "" : "s") + " available - click to add to your pizza.");
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    for (const topping of filtered) grid.appendChild(toppingCard(topping));
+    els.container.appendChild(grid);
+  }
+
+  els.filter.addEventListener("change", renderContainer);
+
+  async function loadToppings() {
+    setStatus(els.listStatus, "Loading menu…");
+    try {
+      const res = await fetch(TOPPING_SERVICE_BASE + "/toppings?limit=200");
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.detail || (res.status + " " + res.statusText));
+      allToppings = body.items;
+      renderContainer();
+    } catch (e) {
+      setStatus(els.listStatus, "Couldn't reach topping-service: " + e.message, "error");
+    }
+  }
+
+  loadToppings();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toppings</title>
+<link rel="stylesheet" href="/static/theme.css">
+</head>
+<body>
+<nav class="topnav"><div class="inner">
+  <a class="brand" href="/">Pizza Service</a>
+  <a class="navlink" href="/flour-explorer">Flour Explorer</a>
+  <a class="navlink" href="/flour-products/new">Add Flour Product</a>
+  <a class="navlink" href="/new-recipe">New Recipe</a>
+  <a class="navlink" href="/pre-ferments">Pre-ferments</a>
+  <a class="navlink" href="/saved-recipes">Recipes</a>
+  <a class="navlink" href="/compose-pizza">Compose Pizza</a>
+  <a class="navlink active" href="/toppings">Toppings</a>
+</div></nav>
+<div class="wrap">
+  <header class="page-head">
+    <h1>Toppings</h1>
+    <p class="subtitle">Add toppings to the pizzeria menu - plain ingredients or composite ones made from their own small recipe (e.g. pesto, ricotta with lemon zest).</p>
+    <p class="source-note">Served by <a href="__TOPPING_SERVICE_URL__/docs" target="_blank" rel="noopener">topping-service</a>, a separate microservice in this repo.</p>
+  </header>
+
+  <form class="panel grid-fields" id="topping-form">
+    <div class="field">
+      <label for="f-name">Name</label>
+      <input id="f-name" type="text" required placeholder="e.g. Mushrooms, Pesto">
+    </div>
+    <div class="field">
+      <label for="f-category">Category</label>
+      <select id="f-category">
+        <option value="vegetable">Vegetable</option>
+        <option value="cheese">Cheese</option>
+        <option value="meat">Meat</option>
+        <option value="sauce">Sauce</option>
+        <option value="other">Other</option>
+      </select>
+    </div>
+    <div class="field">
+      <label><input type="checkbox" id="f-vegetarian"> Vegetarian</label>
+    </div>
+    <div class="field">
+      <label><input type="checkbox" id="f-vegan"> Vegan</label>
+    </div>
+    <div class="field wide">
+      <label for="f-description">Description (optional)</label>
+      <input id="f-description" type="text" placeholder="e.g. brand, prep style, 'added after baking'">
+    </div>
+
+    <div class="field wide">
+      <label><input type="checkbox" id="f-composite"> This topping is composed of its own recipe (e.g. pesto, ricotta with lemon zest)</label>
+    </div>
+
+    <div id="components-panel" style="display:none;" class="field wide">
+      <label>Components</label>
+      <div id="component-rows"></div>
+      <button type="button" id="add-component-btn" style="align-self:flex-start;">+ Add component</button>
+    </div>
+
+    <details class="advanced">
+      <summary>API key</summary>
+      <div style="margin-top:10px; max-width: 320px;">
+        <div class="field"><label for="f-apikey">API key (only if topping-service requires one)</label><input id="f-apikey" type="password" autocomplete="off" placeholder="X-API-Key"></div>
+      </div>
+    </details>
+
+    <div class="actions-row">
+      <button type="submit" class="primary">Add topping</button>
+    </div>
+  </form>
+
+  <div id="status" role="status" aria-live="polite"></div>
+
+  <h2 style="font-size:1.05rem;">Menu</h2>
+  <div class="field" style="max-width:220px;">
+    <label for="f-filter">Filter by category</label>
+    <select id="f-filter">
+      <option value="">All categories</option>
+      <option value="vegetable">Vegetable</option>
+      <option value="cheese">Cheese</option>
+      <option value="meat">Meat</option>
+      <option value="sauce">Sauce</option>
+      <option value="other">Other</option>
+    </select>
+  </div>
+  <div id="list-status" class="status-line"></div>
+  <div id="topping-list"></div>
+</div>
+
+<script>
+(function () {
+  const TOPPING_SERVICE_BASE = "__TOPPING_SERVICE_URL__";
+  let componentRowCount = 0;
+  let allToppings = [];
+
+  const els = {
+    form: document.getElementById("topping-form"),
+    name: document.getElementById("f-name"),
+    category: document.getElementById("f-category"),
+    vegetarian: document.getElementById("f-vegetarian"),
+    vegan: document.getElementById("f-vegan"),
+    description: document.getElementById("f-description"),
+    composite: document.getElementById("f-composite"),
+    componentsPanel: document.getElementById("components-panel"),
+    componentRows: document.getElementById("component-rows"),
+    addComponentBtn: document.getElementById("add-component-btn"),
+    apikey: document.getElementById("f-apikey"),
+    status: document.getElementById("status"),
+    filter: document.getElementById("f-filter"),
+    listStatus: document.getElementById("list-status"),
+    toppingList: document.getElementById("topping-list"),
+  };
+
+  function authHeaders(json) {
+    const key = els.apikey.value.trim();
+    const headers = key ? { "X-API-Key": key } : {};
+    if (json) headers["Content-Type"] = "application/json";
+    return headers;
+  }
+
+  async function toppingFetch(path, options) {
+    const res = await fetch(TOPPING_SERVICE_BASE + path, { ...options, headers: { ...authHeaders(!!options?.body), ...(options?.headers || {}) } });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.detail || (res.status + " " + res.statusText));
+    return body;
+  }
+
+  function setStatus(el, text, cls) {
+    el.textContent = text || "";
+    el.classList.remove("error", "ok");
+    if (cls) el.classList.add(cls);
+  }
+
+  function addComponentRow() {
+    componentRowCount += 1;
+    const row = document.createElement("div");
+    row.className = "blend-row";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text"; nameInput.required = true; nameInput.placeholder = "e.g. basil";
+    const amountInput = document.createElement("input");
+    amountInput.type = "text"; amountInput.placeholder = "amount (optional), e.g. 2 tbsp";
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button"; removeBtn.textContent = "Remove";
+    removeBtn.addEventListener("click", () => row.remove());
+
+    const wrapField = (labelText, input) => {
+      const field = document.createElement("div");
+      field.className = "field";
+      const label = document.createElement("label");
+      label.textContent = labelText;
+      field.appendChild(label);
+      field.appendChild(input);
+      return field;
+    };
+
+    row.appendChild(wrapField("Ingredient", nameInput));
+    row.appendChild(wrapField("Amount", amountInput));
+    row.appendChild(removeBtn);
+    els.componentRows.appendChild(row);
+  }
+
+  els.composite.addEventListener("change", () => {
+    els.componentsPanel.style.display = els.composite.checked ? "" : "none";
+    if (els.composite.checked && !els.componentRows.children.length) {
+      addComponentRow();
+      addComponentRow();
+    }
+  });
+
+  els.addComponentBtn.addEventListener("click", () => addComponentRow());
+
+  function toppingCard(topping) {
+    const el = document.createElement("article");
+    el.className = "card";
+    const body = document.createElement("div");
+    body.className = "card-body";
+    const badges =
+      '<span class="badge">' + topping.category + "</span>" +
+      (topping.vegan ? '<span class="badge ok">vegan</span>' : topping.vegetarian ? '<span class="badge ok">vegetarian</span>' : "") +
+      (topping.components ? '<span class="badge">recipe</span>' : "");
+    body.innerHTML =
+      '<p class="card-name">' + topping.name + "</p>" +
+      '<div class="badges">' + badges + "</div>" +
+      (topping.description ? '<p class="card-sub">' + topping.description + "</p>" : "");
+    if (topping.components) {
+      const details = document.createElement("div");
+      details.className = "details";
+      details.innerHTML = "<dt>Components</dt><dd>" +
+        topping.components.map((c) => c.name + (c.amount ? " (" + c.amount + ")" : "")).join(", ") + "</dd>";
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.textContent = "Recipe";
+      toggle.addEventListener("click", () => details.classList.toggle("open"));
+      body.appendChild(toggle);
+      body.appendChild(details);
+    }
+    const deleteBtn = document.createElement("button");
+    deleteBtn.textContent = "Delete";
+    deleteBtn.className = "danger";
+    deleteBtn.style.marginLeft = "6px";
+    deleteBtn.addEventListener("click", async () => {
+      deleteBtn.disabled = true;
+      try {
+        await toppingFetch("/toppings/" + encodeURIComponent(topping.id), { method: "DELETE" });
+        loadToppings();
+      } catch (e) {
+        setStatus(els.listStatus, "Couldn't delete: " + e.message, "error");
+        deleteBtn.disabled = false;
+      }
+    });
+    body.appendChild(deleteBtn);
+    el.appendChild(body);
+    return el;
+  }
+
+  function renderList() {
+    const filterValue = els.filter.value;
+    const filtered = filterValue ? allToppings.filter((t) => t.category === filterValue) : allToppings;
+    els.toppingList.innerHTML = "";
+    if (!filtered.length) {
+      setStatus(els.listStatus, "No toppings in this category yet.");
+      return;
+    }
+    setStatus(els.listStatus, filtered.length + " topping" + (filtered.length === 1 ? "" : "s") + ".");
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    for (const topping of filtered) grid.appendChild(toppingCard(topping));
+    els.toppingList.appendChild(grid);
+  }
+
+  async function loadToppings() {
+    setStatus(els.listStatus, "Loading…");
+    els.toppingList.innerHTML = "";
+    try {
+      const data = await toppingFetch("/toppings?limit=200");
+      allToppings = data.items;
+      renderList();
+    } catch (e) {
+      setStatus(els.listStatus, "Couldn't reach topping-service: " + e.message, "error");
+    }
+  }
+
+  els.filter.addEventListener("change", renderList);
+
+  els.form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    setStatus(els.status, "Saving…");
+    const body = {
+      name: els.name.value.trim(),
+      category: els.category.value,
+      vegetarian: els.vegetarian.checked,
+      vegan: els.vegan.checked,
+    };
+    const description = els.description.value.trim();
+    if (description) body.description = description;
+    if (els.composite.checked) {
+      const rows = Array.from(els.componentRows.querySelectorAll(".blend-row"));
+      body.components = rows.map((row) => {
+        const [nameField, amountField] = row.querySelectorAll("input");
+        const component = { name: nameField.value.trim() };
+        const amount = amountField.value.trim();
+        if (amount) component.amount = amount;
+        return component;
+      }).filter((c) => c.name);
+    }
+    try {
+      await toppingFetch("/toppings", { method: "POST", body: JSON.stringify(body) });
+      setStatus(els.status, "Topping added.", "ok");
+      els.form.reset();
+      els.componentsPanel.style.display = "none";
+      els.componentRows.innerHTML = "";
+      loadToppings();
+    } catch (e) {
+      setStatus(els.status, "Couldn't add topping: " + e.message, "error");
+    }
+  });
+
+  loadToppings();
+})();
+</script>
+</body>
+</html>
