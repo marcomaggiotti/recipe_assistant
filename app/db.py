@@ -151,9 +151,11 @@ class CosmosPizzaRepository(PizzaRepository):
         return record
 
     def get(self, item_id):
+        from azure.cosmos.exceptions import CosmosResourceNotFoundError
+
         try:
             return self._container.read_item(item=item_id, partition_key=item_id)
-        except Exception:
+        except CosmosResourceNotFoundError:
             return None
 
     def list(self, limit, offset):
@@ -163,10 +165,12 @@ class CosmosPizzaRepository(PizzaRepository):
         return items[offset: offset + limit], total
 
     def delete(self, item_id):
+        from azure.cosmos.exceptions import CosmosResourceNotFoundError
+
         try:
             self._container.delete_item(item=item_id, partition_key=item_id)
             return True
-        except Exception:
+        except CosmosResourceNotFoundError:
             return False
 
 
