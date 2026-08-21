@@ -134,7 +134,21 @@ class PostgresPizzaRepository(PizzaRepository):
 
 
 class CosmosPizzaRepository(PizzaRepository):
-    """Azure Cosmos DB (NoSQL API)."""
+    """Azure Cosmos DB (NoSQL API).
+
+    get()/delete() deliberately do NOT do a partition-key point read/delete keyed on
+    item_id (i.e. container.read_item(item=id, partition_key=id)) - that only returns
+    correct results if the container's actual partition key path is "/id". This code
+    only sets that partition key when IT creates a brand-new container;
+    create_container_if_not_exists() silently returns an already-existing container
+    as-is, ignoring the partition_key argument, if one by that name/id already exists
+    (e.g. created manually in the Azure Portal, or by an earlier version of this code).
+    A point read/delete against the wrong partition key value looks in the wrong
+    physical partition and Cosmos correctly reports "not found" even though the
+    document exists elsewhere in the container - which would silently 404 a real,
+    listable recipe. Querying by id (like list() already does) is slightly more
+    expensive in RUs but correct regardless of the container's actual partition key.
+    """
 
     def __init__(self, settings: Settings):
         from azure.cosmos import CosmosClient, PartitionKey
@@ -144,19 +158,29 @@ class CosmosPizzaRepository(PizzaRepository):
         self._container = database.create_container_if_not_exists(
             id=settings.cosmos_container, partition_key=PartitionKey(path="/id")
         )
+        # The actual partition key path (only known for certain once the container
+        # exists - see class docstring) - used to pull the right value out of a found
+        # record for delete_item(), which unlike query_items() always needs one.
+        # Assumes a single-segment top-level path ("/id", "/pk", ...), true for every
+        # container this app creates or expects; a deeper path (e.g. "/a/b") isn't
+        # supported and would need this to walk record[a][b] instead.
+        self._partition_key_field = self._container.read()["partitionKey"]["paths"][0].lstrip("/")
 
     def create(self, name, result):
         record = _new_record(name, result)
         self._container.create_item(body=record)
         return record
 
-    def get(self, item_id):
-        from azure.cosmos.exceptions import CosmosResourceNotFoundError
+    def _find(self, item_id):
+        query = "SELECT * FROM c WHERE c.id = @id"
+        items = list(self._container.query_items(
+            query=query, parameters=[{"name": "@id", "value": item_id}],
+            enable_cross_partition_query=True,
+        ))
+        return items[0] if items else None
 
-        try:
-            return self._container.read_item(item=item_id, partition_key=item_id)
-        except CosmosResourceNotFoundError:
-            return None
+    def get(self, item_id):
+        return self._find(item_id)
 
     def list(self, limit, offset):
         query = "SELECT * FROM c ORDER BY c.created_at DESC"
@@ -165,13 +189,11 @@ class CosmosPizzaRepository(PizzaRepository):
         return items[offset: offset + limit], total
 
     def delete(self, item_id):
-        from azure.cosmos.exceptions import CosmosResourceNotFoundError
-
-        try:
-            self._container.delete_item(item=item_id, partition_key=item_id)
-            return True
-        except CosmosResourceNotFoundError:
+        record = self._find(item_id)
+        if record is None:
             return False
+        self._container.delete_item(item=record, partition_key=record[self._partition_key_field])
+        return True
 
 
 def build_repository(settings: Settings) -> PizzaRepository:
